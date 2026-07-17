@@ -1,0 +1,12 @@
+name = "sua-airspace-automation"
+main = "src/index.js"
+compatibility_date = "2026-07-17"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sua-airspace"
+database_id = "b8a2fb13-b202-4bd9-a54f-5309d6c03fd3"

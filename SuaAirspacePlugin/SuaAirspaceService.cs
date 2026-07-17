@@ -114,7 +114,7 @@ public sealed class SuaAirspaceService : IDisposable
         {
             try
             {
-                return Network.IsConnected && Convert.ToInt32(Network.Rating, CultureInfo.InvariantCulture) >= 2;
+                return Network.IsConnected && Convert.ToInt32(Network.Facility, CultureInfo.InvariantCulture) > 0;
             }
             catch
             {
@@ -135,6 +135,7 @@ public sealed class SuaAirspaceService : IDisposable
         var instance = RestrictedAreas.Instance;
         var controllerCid = GetControllerCid();
         var controllerRating = GetControllerRating();
+        var controllerFacility = GetControllerFacility();
         if (!IsConnected || instance is null || instance.Areas.Count == 0)
         {
             if (installationId is null)
@@ -147,6 +148,7 @@ public sealed class SuaAirspaceService : IDisposable
                 InstallationId = installationId,
                 ControllerCid = controllerCid,
                 ControllerRating = controllerRating,
+                ControllerFacility = controllerFacility,
                 UserLeaseSeconds = userLeaseSeconds,
                 UserActivations = new List<ControllerActivation>(),
             };
@@ -189,6 +191,7 @@ public sealed class SuaAirspaceService : IDisposable
                 InstallationId = installationId,
                 ControllerCid = controllerCid,
                 ControllerRating = controllerRating,
+                ControllerFacility = controllerFacility,
                 UserLeaseSeconds = userLeaseSeconds,
                 UserActivations = CanActivateRestrictedAreas
                     ? GetControllerActivations(instance)
@@ -917,6 +920,12 @@ public sealed class SuaAirspaceService : IDisposable
         catch { return ""; }
     }
 
+    private static string GetControllerFacility()
+    {
+        try { return Network.Facility.ToString(); }
+        catch { return ""; }
+    }
+
     private static RestrictedAreas.RestrictedArea.Activation CloneActivation(
         RestrictedAreas.RestrictedArea.Activation activation)
     {
@@ -1006,7 +1015,7 @@ public sealed class SuaAirspaceService : IDisposable
     private static object Failure(string error) => new { Success = false, Error = error };
 
     private static object ActivationPermissionFailure() =>
-        Failure("Restricted Area activation requires a VATSIM rating of S1 or higher.");
+        Failure("Connect to VATSIM in a controller position (not OBS) to activate Restricted Areas.");
 
     private static string UtcNowString() =>
         DateTime.UtcNow.ToString("HHmm'Z'", CultureInfo.InvariantCulture);

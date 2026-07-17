@@ -32,8 +32,40 @@ function requestedPath(context) {
   return "/" + (Array.isArray(path) ? path.join("/") : String(path || ""));
 }
 
+async function pruneElapsedDesiredWindows(db, nowDate = new Date()) {
+  const nowWire = wireDate(nowDate);
+  const result = await db.prepare(
+    `SELECT name, source_type, source_id, windows, floor, ceiling
+       FROM desired_activations
+      WHERE h24 = 0 AND windows <> '[]'`
+  ).all();
+  const statements = [];
+
+  for (const row of result.results || []) {
+    const parsed = parseJson(row.windows);
+    const stored = (Array.isArray(parsed) ? parsed : []).map((value) => String(value));
+    const future = stored.filter((value) =>
+      /^\d{12}-\d{12}$/.test(value) && value.slice(13) > nowWire);
+    if (future.length === stored.length && future.every((value, index) => value === stored[index])) continue;
+
+    if (!future.length && row.floor === null && row.ceiling === null) {
+      statements.push(db.prepare(
+        "DELETE FROM desired_activations WHERE name = ? AND source_type = ? AND source_id = ?"
+      ).bind(row.name, row.source_type, row.source_id));
+    } else {
+      statements.push(db.prepare(
+        "UPDATE desired_activations SET windows = ? WHERE name = ? AND source_type = ? AND source_id = ?"
+      ).bind(JSON.stringify(future), row.name, row.source_type, row.source_id));
+    }
+  }
+
+  await runStatements(db, statements);
+}
+
 async function loadDesired(db, excludedControllerId = "") {
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  await pruneElapsedDesiredWindows(db, nowDate);
+  const now = nowDate.toISOString();
   const result = await db.prepare(
     `SELECT name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, expires_at, updated_at
        FROM desired_activations
@@ -79,7 +111,9 @@ async function replaceControllerActivations(db, snapshot, catalogueNames) {
     "DELETE FROM desired_activations WHERE source_type = 'controller' AND source_id = ?"
   ).bind(installationId)];
   const controllerRating = String(snapshot?.ControllerRating || "").trim().toUpperCase();
-  const userActivations = controllerRating === "OBS"
+  const controllerFacility = String(snapshot?.ControllerFacility || "").trim().toUpperCase();
+  const isObserver = controllerFacility === "OBS" || (!controllerFacility && controllerRating === "OBS");
+  const userActivations = isObserver
     ? []
     : (Array.isArray(snapshot?.UserActivations) ? snapshot.UserActivations : []);
 
@@ -171,7 +205,7 @@ async function areasResponse(env) {
       Hidden: Boolean(row.hidden),
       Default: defaultActive || defaultPreActive,
       DefaultSuppressed: false,
-      Manual: manual,
+      Manual: controller ? false : manual,
       Controller: controller,
       ControllerCids: controllerCids,
       ControllerLocked: controller,
@@ -180,7 +214,7 @@ async function areasResponse(env) {
       Windows: stagedWindows,
       LevelsEdited: Boolean(staged && (staged.Floor !== null || staged.Ceiling !== null)),
       Staged: Boolean(staged),
-      Saved: saved,
+      Saved: controller ? false : saved,
       Sources: staged?.Sources || [],
     };
   });

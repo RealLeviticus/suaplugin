@@ -155,7 +155,12 @@ public sealed class CloudSyncService : IDisposable
         foreach (var pair in incoming)
         {
             var item = pair.Value;
-            var windows = (item.Windows ?? new List<string>()).OrderBy(value => value, StringComparer.Ordinal).ToList();
+            var nowWire = DateTime.UtcNow.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
+            var windows = (item.Windows ?? new List<string>())
+                .Where(value => value is not null && value.Length == 25 && value[12] == '-' &&
+                    string.CompareOrdinal(value.Substring(13), nowWire) > 0)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToList();
             var fingerprint = (item.H24 ? "1" : "0") + "|" + string.Join(",", windows) + "|" +
                 item.Floor?.ToString(CultureInfo.InvariantCulture) + "|" +
                 item.Ceiling?.ToString(CultureInfo.InvariantCulture);

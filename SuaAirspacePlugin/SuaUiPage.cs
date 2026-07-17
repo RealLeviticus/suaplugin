@@ -135,15 +135,16 @@ button.danger-btn{border-color:#600000;color:#600000;}
       if (search && a.Name.toUpperCase().indexOf(search) < 0) continue;
       shown++;
       var status = a.Active ? ""<span class='pill act'>ACTIVE</span>"" : (a.PreActive ? ""<span class='pill pre'>PREACT</span>"" : ""<span class='pill'>OFF</span>"");
-      if (a.Default) status += ""<span class='pill def'>DEFAULT</span>"";
-      if (a.Manual) status += ""<span class='pill man'>MAN</span>"";
       if (a.Controller){
         var userLabel = 'USER';
         if (a.ControllerCids && a.ControllerCids.length) userLabel += ': ' + a.ControllerCids.join(', ');
         status += ""<span class='pill user'>"" + esc(userLabel) + ""</span>"";
+      } else {
+        if (a.Default) status += ""<span class='pill def'>DEFAULT</span>"";
+        if (a.Manual) status += ""<span class='pill man'>MAN</span>"";
+        if (a.Scheduled && !a.Manual) status += ""<span class='pill sched'>SCHED</span>"";
+        if (a.Saved) status += ""<span class='pill stage'>SAVED</span>"";
       }
-      if (a.Scheduled && !a.Manual) status += ""<span class='pill sched'>SCHED</span>"";
-      if (a.Saved) status += ""<span class='pill stage'>SAVED</span>"";
       var sched = a.Schedule ? esc(a.Schedule) : '';
       if (a.Windows.length){
         var wins = [];

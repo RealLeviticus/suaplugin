@@ -12,6 +12,7 @@ A vatSys plugin and public Cloudflare control page for staging and applying Aust
 - Plugin activations use vatSys's standard restricted-area colour with no plugin-added infill.
 - Every active SUA border is drawn with a solid line, including activations made through vatSys itself.
 - Dated UTC windows and temporary vertical-limit edits are supported. Original levels restore when an area is deactivated.
+- When one scheduled activation window ends, it is removed from the shared planned schedule while any later windows remain staged.
 
 ## Using It
 
@@ -20,8 +21,9 @@ Open `https://sua.actuallyleviticus.xyz/`.
 - `ACT` saves an H24 or duration-based shared activation. `DEACT` clears saved shared sources; vatSys-native/default activations are read-only and remain active.
 - `EDIT` changes levels or replaces the area's dated UTC activation windows.
 - `SAVED` means the desired state is stored in D1 and is available to every plugin installation independently.
-- `USER: CID` identifies a live activation configured by that controller in vatSys and shared to other connected controllers. The CID comes directly from vatSys's connection state. These sources use a short renewable lease so they disappear after the originating plugin disconnects and do not show `SAVED` unless a persistent website or NOTAM source also exists.
-- Controllers connected with an OBS rating can view dataset and shared SUA, but cannot retain or publish Restricted Area activations. Local OBS changes are restored to the dataset/shared state and the cloud API ignores OBS controller activations.
+- `USER: CID` identifies a live activation configured by that controller in vatSys and shared to other connected controllers. The CID comes directly from vatSys's connection state. These sources use a short renewable lease so they disappear after the originating plugin disconnects.
+- A live vatSys controller activation displays only its timing state (`ACTIVE`, `PREACT`, or `OFF`) and `USER: CID`; overlapping stored sources do not add `MAN`, `SCHED`, or `SAVED` badges to that row.
+- Controllers connected with the OBS facility can view dataset and shared SUA, but cannot retain or publish Restricted Area activations, regardless of their underlying VATSIM certification rating. Local OBS changes are restored to the dataset/shared state and the cloud API ignores OBS controller activations.
 - Controller-created areas show `USER LOCKED` instead of website controls and cannot be deactivated through individual, global, or NOTAM actions while their originating controller remains connected.
 - `DEFAULT` is profile-defined. Its action column contains a full-width `DATASET LOCKED` box in place of ACT and EDIT, and neither website nor controller-synchronisation actions can remove it.
 - The NOTAM panel is refreshed automatically. Current and upcoming airspace NOTAM windows are saved by the scheduled Worker; each NOTAM can also activate or deactivate all matched areas explicitly.

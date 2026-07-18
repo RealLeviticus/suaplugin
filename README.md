@@ -25,7 +25,7 @@ A vatSys plugin and public Cloudflare control page for staging and applying Aust
 
 Open `https://sua.actuallyleviticus.xyz/`.
 
-- `ACT` saves an H24 or duration-based shared activation. `DEACT` clears saved shared sources; vatSys-native/default activations are read-only and remain active.
+- `ACT` saves an H24, duration-based, HJ, or HN shared activation. HJ runs from sunrise to sunset and HN from sunset to the next sunrise, calculated daily at the centre of each airspace area. `DEACT` clears saved shared sources; vatSys-native/default activations are read-only and remain active.
 - `EDIT` changes levels or replaces the area's dated UTC activation windows.
 - `SAVED` means the desired state is stored in D1 and is available to every plugin installation independently.
 - Pending activation requests can be edited from the `REQUESTS` panel before review, but only their selected areas, RA category, and UTC times can be changed. The submitted name or CID, contact email, and activation details remain read-only. Accepted or declined requests are no longer editable.
@@ -60,6 +60,7 @@ Public website endpoints:
 |---|---|
 | `GET /api/sua/areas` | Shared area catalogue and D1-backed desired state |
 | `POST /api/sua/activate?name=X&minutes=N` | Stage H24 or a duration |
+| `POST /api/sua/activate?name=X&mode=HJ|HN` | Stage recurring sunrise/sunset or sunset/sunrise activation |
 | `POST /api/sua/deactivate?name=X` | Clear every desired source for an area |
 | `POST /api/sua/deactivateall` | Clear all desired state |
 | `POST /api/sua/windows?name=X&windows=...` | Replace manual UTC windows |

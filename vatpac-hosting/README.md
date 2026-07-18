@@ -10,6 +10,7 @@ The container currently imports the proven application modules and static assets
 - `postgres`: PostgreSQL 17 with a persistent named volume.
 - Database migrations run automatically and transactionally when `site` starts.
 - The canonical vatSys area dataset and VATPAC NOTAM feed refresh every 60 seconds by default. Overlapping refreshes are suppressed.
+- HJ and HN activation modes calculate rolling sunrise/sunset windows at each area's dataset-derived geographic centre.
 - `GET /healthz` checks both the HTTP process and PostgreSQL connection.
 
 The compose file is suitable for evaluation and a simple single-host deployment. VATPAC can point an existing managed PostgreSQL service at the site container instead by setting `DATABASE_URL` and deploying only the `site` image.

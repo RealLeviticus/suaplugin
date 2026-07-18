@@ -107,8 +107,25 @@ function xmlAttr(tag, name) {
   return match ? match[1] : "";
 }
 
+function decimalCoordinate(value, degreeDigits) {
+  const sign = value.charAt(0) === "-" ? -1 : 1, body = value.slice(1);
+  return sign * (Number(body.slice(0, degreeDigits)) + Number(body.slice(degreeDigits, degreeDigits + 2)) / 60
+    + Number(body.slice(degreeDigits + 2)) / 3600);
+}
+
+function areaCentre(inner) {
+  const body = (inner.match(/<Area>([\s\S]*?)<\/Area>/i) || [])[1] || "";
+  const token = /([+-]\d{6}(?:\.\d+)?)([+-]\d{7}(?:\.\d+)?)/g;
+  const latitudes = [], longitudes = [];
+  for (const match of body.matchAll(token)) {
+    latitudes.push(decimalCoordinate(match[1], 2)); longitudes.push(decimalCoordinate(match[2], 3));
+  }
+  if (!latitudes.length) return { latitude: null, longitude: null };
+  return { latitude: (Math.min(...latitudes) + Math.max(...latitudes)) / 2, longitude: (Math.min(...longitudes) + Math.max(...longitudes)) / 2 };
+}
+
 // Parse the vatSys australia-dataset RestrictedAreas.xml into catalogue rows.
-function parseDatasetAreas(xml) {
+export function parseDatasetAreas(xml) {
   const areas = [];
   const blockRegex = /<RestrictedArea\b([^>]*)>([\s\S]*?)<\/RestrictedArea>/g;
   let block;
@@ -139,6 +156,7 @@ function parseDatasetAreas(xml) {
         : (linePattern.toLowerCase() === "solid" ? "RA3" : null));
     const prefix = name.charAt(0).toUpperCase();
     const areaType = prefix === "D" ? "Danger" : (prefix === "R" ? "Restricted" : (prefix === "M" ? "Military" : xmlAttr(attrs, "Type").trim()));
+    const centre = areaCentre(inner);
     areas.push({
       name,
       type: areaType,
@@ -149,6 +167,8 @@ function parseDatasetAreas(xml) {
       linePattern,
       raCategory,
       schedule: schedule.join(", "),
+      latitude: centre.latitude,
+      longitude: centre.longitude,
     });
   }
   return areas;
@@ -174,14 +194,14 @@ async function refreshAreas(env) {
     const statements = areas.slice(offset, offset + 50).map((area) => env.DB.prepare(
       `INSERT INTO areas
         (name, type, floor, ceiling, daiw, schedule, active, pre_active, hidden, manual,
-         h24_manual, scheduled, windows, levels_edited, line_pattern, ra_category, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 0, 0, 0, '[]', 0, ?, ?, ?)
+         h24_manual, scheduled, windows, levels_edited, line_pattern, ra_category, latitude, longitude, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 0, 0, 0, '[]', 0, ?, ?, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
          type=excluded.type, floor=excluded.floor, ceiling=excluded.ceiling, daiw=excluded.daiw,
           schedule=excluded.schedule, hidden=excluded.hidden, line_pattern=excluded.line_pattern,
-          ra_category=excluded.ra_category, last_seen=excluded.last_seen`
+          ra_category=excluded.ra_category, latitude=excluded.latitude, longitude=excluded.longitude, last_seen=excluded.last_seen`
     ).bind(area.name, area.type, area.floor, area.ceiling, area.daiw ? 1 : 0, area.schedule,
-      area.hidden ? 1 : 0, area.linePattern, area.raCategory, now));
+      area.hidden ? 1 : 0, area.linePattern, area.raCategory, area.latitude, area.longitude, now));
     if (statements.length) await env.DB.batch(statements);
   }
   await env.DB.batch([

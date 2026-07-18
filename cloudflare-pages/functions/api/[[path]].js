@@ -1,3 +1,5 @@
+import { solarWindows } from "./solar.js";
+
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
 
 function json(payload, status = 200) {
@@ -148,7 +150,7 @@ async function pruneElapsedDesiredWindows(db, nowDate = new Date()) {
   const result = await db.prepare(
     `SELECT name, source_type, source_id, windows, floor, ceiling
        FROM desired_activations
-      WHERE h24 = 0 AND windows <> '[]'`
+      WHERE h24 = 0 AND solar_mode IS NULL AND windows <> '[]'`
   ).all();
   const statements = [];
 
@@ -178,10 +180,11 @@ async function loadDesired(db, excludedControllerId = "") {
   await pruneElapsedDesiredWindows(db, nowDate);
   const now = nowDate.toISOString();
   const result = await db.prepare(
-    `SELECT name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, line_pattern, ra_category, expires_at, updated_at
-       FROM desired_activations
-      WHERE expires_at IS NULL OR expires_at > ?
-      ORDER BY updated_at`
+    `SELECT d.name, d.source_type, d.source_id, d.controller_cid, d.h24, d.windows, d.floor, d.ceiling,
+            d.line_pattern, d.ra_category, d.solar_mode, d.expires_at, d.updated_at, a.latitude, a.longitude
+       FROM desired_activations d LEFT JOIN areas a ON a.name = d.name
+      WHERE d.expires_at IS NULL OR d.expires_at > ?
+      ORDER BY d.updated_at`
   ).bind(now).all();
 
   const byName = new Map();
@@ -190,11 +193,15 @@ async function loadDesired(db, excludedControllerId = "") {
       continue;
     let item = byName.get(row.name);
     if (!item) {
-      item = { Name: row.name, H24: false, Windows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, Sources: [] };
+      item = { Name: row.name, H24: false, Windows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [] };
       byName.set(row.name, item);
     }
     item.H24 = item.H24 || Boolean(row.h24);
-    for (const window of parseJson(row.windows)) {
+    const rowWindows = row.solar_mode && row.latitude !== null && row.longitude !== null
+      ? solarWindows(row.solar_mode, Number(row.latitude), Number(row.longitude), nowDate)
+      : parseJson(row.windows);
+    if (row.solar_mode && !item.SolarModes.includes(row.solar_mode)) item.SolarModes.push(row.solar_mode);
+    for (const window of rowWindows) {
       if (!item.Windows.includes(window)) item.Windows.push(window);
     }
     if (row.floor !== null && row.floor !== undefined) item.Floor = Number(row.floor);
@@ -347,7 +354,7 @@ async function areasResponse(env) {
       Floor: staged?.Floor ?? row.floor,
       Ceiling: staged?.Ceiling ?? row.ceiling,
       Daiw: Boolean(row.daiw),
-      Schedule: staged?.H24 ? "H24" : (row.schedule || ""),
+      Schedule: staged?.H24 ? "H24" : (staged?.SolarModes?.join("+") || row.schedule || ""),
       Active: timing.active || defaultActive,
       PreActive: timing.preActive || defaultPreActive,
       Hidden: Boolean(row.hidden),
@@ -383,7 +390,7 @@ async function requireArea(db, name) {
 
 async function upsertManual(db, name, values) {
   const existing = await db.prepare(
-    "SELECT h24, windows, floor, ceiling, line_pattern, ra_category, expires_at FROM desired_activations WHERE name = ? AND source_type = 'manual' AND source_id = 'web'"
+    "SELECT h24, windows, floor, ceiling, line_pattern, ra_category, solar_mode, expires_at FROM desired_activations WHERE name = ? AND source_type = 'manual' AND source_id = 'web'"
   ).bind(name).first();
   const h24 = values.h24 ?? Boolean(existing?.h24);
   const windows = values.windows ?? parseJson(existing?.windows);
@@ -391,24 +398,34 @@ async function upsertManual(db, name, values) {
   const ceiling = values.ceiling !== undefined ? values.ceiling : (existing?.ceiling ?? null);
   const linePattern = values.linePattern !== undefined ? values.linePattern : (existing?.line_pattern ?? null);
   const raCategory = values.raCategory !== undefined ? values.raCategory : (existing?.ra_category ?? null);
+  const solarMode = values.solarMode !== undefined ? values.solarMode : (existing?.solar_mode ?? null);
   const expiresAt = values.expiresAt !== undefined ? values.expiresAt : (existing?.expires_at ?? null);
   const now = new Date().toISOString();
 
   await db.prepare(
     `INSERT INTO desired_activations
-       (name, source_type, source_id, h24, windows, floor, ceiling, line_pattern, ra_category, expires_at, created_at, updated_at)
-     VALUES (?, 'manual', 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (name, source_type, source_id, h24, windows, floor, ceiling, line_pattern, ra_category, solar_mode, expires_at, created_at, updated_at)
+     VALUES (?, 'manual', 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(name, source_type, source_id) DO UPDATE SET
        h24 = excluded.h24, windows = excluded.windows, floor = excluded.floor,
-       ceiling = excluded.ceiling, line_pattern = excluded.line_pattern, ra_category = excluded.ra_category,
+       ceiling = excluded.ceiling, line_pattern = excluded.line_pattern, ra_category = excluded.ra_category, solar_mode = excluded.solar_mode,
        expires_at = excluded.expires_at, updated_at = excluded.updated_at`
-  ).bind(name, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling, linePattern, raCategory, expiresAt, now, now).run();
+  ).bind(name, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling, linePattern, raCategory, solarMode, expiresAt, now, now).run();
 }
 
 async function activateArea(request, env) {
   const url = new URL(request.url);
   const name = (url.searchParams.get("name") || "").trim();
   if (!await requireArea(env.DB, name)) return json({ Success: false, Error: `Unknown area: ${name}` }, 400);
+  const mode = (url.searchParams.get("mode") || "").trim().toUpperCase();
+  if (mode === "HJ" || mode === "HN") {
+    const location = await env.DB.prepare("SELECT latitude, longitude FROM areas WHERE name = ?").bind(name).first();
+    if (location?.latitude === null || location?.latitude === undefined || location?.longitude === null || location?.longitude === undefined
+      || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude)))
+      return json({ Success: false, Error: "Solar timing is not available for this area yet." }, 409);
+    await upsertManual(env.DB, name, { h24: false, windows: [], solarMode: mode, expiresAt: null });
+    return json({ Success: true, Name: name, Staged: true, Mode: mode });
+  }
   const requested = Number.parseInt(url.searchParams.get("minutes") || "0", 10) || 0;
   const minutes = Math.max(0, Math.min(requested, 7 * 24 * 60));
   if (minutes > 0) {
@@ -417,10 +434,11 @@ async function activateArea(request, env) {
     await upsertManual(env.DB, name, {
       h24: false,
       windows: [`${wireDate(from)}-${wireDate(to)}`],
+      solarMode: null,
       expiresAt: to.toISOString(),
     });
   } else {
-    await upsertManual(env.DB, name, { h24: true, windows: [], expiresAt: null });
+    await upsertManual(env.DB, name, { h24: true, windows: [], solarMode: null, expiresAt: null });
   }
   return json({ Success: true, Name: name, Staged: true });
 }
@@ -440,7 +458,7 @@ async function setWindows(request, env) {
     ? new Date(Date.UTC(Number(lastEnd.slice(0, 4)), Number(lastEnd.slice(4, 6)) - 1,
         Number(lastEnd.slice(6, 8)), Number(lastEnd.slice(8, 10)), Number(lastEnd.slice(10, 12)))).toISOString()
     : null;
-  await upsertManual(env.DB, name, { h24: false, windows, expiresAt });
+  await upsertManual(env.DB, name, { h24: false, windows, solarMode: null, expiresAt });
   return json({ Success: true, Name: name, Staged: true });
 }
 

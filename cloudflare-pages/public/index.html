@@ -96,6 +96,8 @@ button.danger-btn{border-color:#600000;color:#600000;}
     <option value='60'>1 HR</option>
     <option value='120'>2 HR</option>
     <option value='240'>4 HR</option>
+    <option value='HJ'>HJ · SUNRISE TO SUNSET</option>
+    <option value='HN'>HN · SUNSET TO SUNRISE</option>
   </select>
   <button id='deactAll' class='danger-btn'>CLEAR SHARED ACTIVATIONS</button>
 </div>
@@ -309,7 +311,10 @@ button.danger-btn{border-color:#600000;color:#600000;}
 
   window.act = function(verb, name){
     var url = '/api/sua/' + verb + '?name=' + name;
-    if (verb === 'activate') url += '&minutes=' + document.getElementById('dur').value;
+    if (verb === 'activate'){
+      var duration = document.getElementById('dur').value;
+      url += (duration === 'HJ' || duration === 'HN') ? '&mode=' + duration : '&minutes=' + duration;
+    }
     if (verb === 'deactivate' && editing === decodeURIComponent(name)){ editing = null; draft = null; }
     post(url);
   };

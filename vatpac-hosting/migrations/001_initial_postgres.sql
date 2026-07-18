@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS areas (
     levels_edited INTEGER NOT NULL DEFAULT 0,
     line_pattern TEXT,
     ra_category TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
     last_seen TEXT NOT NULL
 );
 
@@ -32,6 +34,7 @@ CREATE TABLE IF NOT EXISTS desired_activations (
     controller_cid TEXT,
     line_pattern TEXT,
     ra_category TEXT,
+    solar_mode TEXT,
     PRIMARY KEY (name, source_type, source_id)
 );
 CREATE INDEX IF NOT EXISTS idx_desired_expiry ON desired_activations(expires_at);

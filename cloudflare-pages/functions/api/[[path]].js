@@ -27,6 +27,10 @@ function showWindow(wire) {
   return `${parts[0].slice(6, 8)}/${parts[0].slice(4, 6)} ${parts[0].slice(8, 12)}-${parts[1].slice(8, 12)}Z`;
 }
 
+function categoryLinePattern(category) {
+  return category === "RA1" ? "Dashed" : (category === "RA2" ? "Dotted" : (category === "RA3" ? "Solid" : null));
+}
+
 function requestedPath(context) {
   const path = context.params.path;
   return "/" + (Array.isArray(path) ? path.join("/") : String(path || ""));
@@ -140,16 +144,20 @@ async function replaceControllerActivations(db, snapshot, catalogueNames) {
     const linePattern = typeof item.LinePattern === "string" && item.LinePattern.trim()
       ? item.LinePattern.trim().slice(0, 32)
       : null;
+    const raCategory = String(linePattern || "").toLowerCase() === "dashed" ? "RA1"
+      : (String(linePattern || "").toLowerCase() === "dotted" ? "RA2"
+        : (String(linePattern || "").toLowerCase() === "solid" ? "RA3" : null));
 
     statements.push(db.prepare(
       `INSERT INTO desired_activations
-         (name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, line_pattern, expires_at, created_at, updated_at)
-       VALUES (?, 'controller', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, line_pattern, ra_category, expires_at, created_at, updated_at)
+       VALUES (?, 'controller', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(name, source_type, source_id) DO UPDATE SET
          controller_cid=excluded.controller_cid, h24=excluded.h24, windows=excluded.windows, floor=excluded.floor,
-         ceiling=excluded.ceiling, line_pattern=excluded.line_pattern, expires_at=excluded.expires_at, updated_at=excluded.updated_at`
+         ceiling=excluded.ceiling, line_pattern=excluded.line_pattern, ra_category=excluded.ra_category,
+         expires_at=excluded.expires_at, updated_at=excluded.updated_at`
     ).bind(name, installationId, controllerCid, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling,
-      linePattern, expiresAt, nowText, nowText));
+      linePattern, raCategory, expiresAt, nowText, nowText));
   }
 
   await runStatements(db, statements);
@@ -245,8 +253,8 @@ async function areasResponse(env) {
       H24Manual: Boolean(staged?.H24),
       Scheduled: Boolean(stagedWindows.length),
       Windows: stagedWindows,
-      LinePattern: staged?.LinePattern ?? null,
-      RaCategory: staged?.RaCategory ?? null,
+      LinePattern: staged?.LinePattern ?? row.line_pattern ?? null,
+      RaCategory: staged?.RaCategory ?? row.ra_category ?? null,
       LevelsEdited: Boolean(staged && (staged.Floor !== null || staged.Ceiling !== null)),
       Staged: Boolean(staged),
       Saved: controller ? false : saved,
@@ -446,11 +454,13 @@ async function reviewActivationRequest(request, env) {
     const areaNames = requestedAreas.length ? requestedAreas : [row.area_name];
     for (const areaName of areaNames) statements.push(env.DB.prepare(
       `INSERT INTO desired_activations
-         (name, source_type, source_id, h24, windows, ra_category, expires_at, created_at, updated_at)
-       VALUES (?, 'request', ?, 0, ?, ?, ?, ?, ?)
+         (name, source_type, source_id, h24, windows, line_pattern, ra_category, expires_at, created_at, updated_at)
+       VALUES (?, 'request', ?, 0, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(name, source_type, source_id) DO UPDATE SET
-         windows=excluded.windows, ra_category=excluded.ra_category, expires_at=excluded.expires_at, updated_at=excluded.updated_at`
-    ).bind(areaName, row.id, JSON.stringify([`${wireDate(start)}-${wireDate(end)}`]), row.ra_category || "RA1", end.toISOString(), now, now));
+         windows=excluded.windows, line_pattern=excluded.line_pattern, ra_category=excluded.ra_category,
+         expires_at=excluded.expires_at, updated_at=excluded.updated_at`
+    ).bind(areaName, row.id, JSON.stringify([`${wireDate(start)}-${wireDate(end)}`]),
+      categoryLinePattern(row.ra_category || "RA1"), row.ra_category || "RA1", end.toISOString(), now, now));
   }
   statements.push(env.DB.prepare(
     "UPDATE activation_requests SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'"

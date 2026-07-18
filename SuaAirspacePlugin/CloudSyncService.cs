@@ -164,7 +164,7 @@ public sealed class CloudSyncService : IDisposable
             var fingerprint = (item.H24 ? "1" : "0") + "|" + string.Join(",", windows) + "|" +
                 item.Floor?.ToString(CultureInfo.InvariantCulture) + "|" +
                 item.Ceiling?.ToString(CultureInfo.InvariantCulture) + "|" +
-                (item.LinePattern ?? "");
+                (item.LinePattern ?? "") + "|" + (item.RaCategory ?? "");
             if (_fingerprints.TryGetValue(item.Name, out var current) && current == fingerprint) continue;
 
             var applied = true;
@@ -181,8 +181,7 @@ public sealed class CloudSyncService : IDisposable
             // Applying the owner's draw style only when the fingerprint changes
             // means a local restyle by a non-activating controller survives every
             // subsequent sync until the activating controller changes it again.
-            if (!string.IsNullOrWhiteSpace(item.LinePattern))
-                _sua.TrySetLinePattern(item.Name, item.LinePattern);
+            _sua.TryApplyRaCategory(item.Name, item.RaCategory, item.LinePattern);
 
             _managedNames.Add(item.Name);
             _fingerprints[item.Name] = fingerprint;
@@ -212,5 +211,6 @@ public sealed class CloudSyncService : IDisposable
         public int? Floor { get; set; }
         public int? Ceiling { get; set; }
         public string? LinePattern { get; set; }
+        public string? RaCategory { get; set; }
     }
 }

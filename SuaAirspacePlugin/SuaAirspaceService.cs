@@ -34,6 +34,7 @@ public sealed class SuaAirspaceService : IDisposable
         public readonly List<Window> Windows = new();
         public RestrictedAreas.RestrictedArea.Activation? Injected;
         public bool? OriginalDaiw;
+        public DisplayMaps.Map.Patterns? OriginalLinePattern;
         public DisplayMaps.Map.InfillTypes? OriginalInfillType;
         public int? OriginalFloor;
         public int? OriginalCeiling;
@@ -272,6 +273,45 @@ public sealed class SuaAirspaceService : IDisposable
         if (area.LinePattern == parsed) return true;
 
         area.LinePattern = parsed;
+        RequestNativeMapRefresh();
+        return true;
+    }
+
+    internal bool TryApplyRaCategory(string name, string? category, string? fallbackPattern)
+    {
+        var area = FindArea(name, out _);
+        if (area is null) return false;
+
+        DisplayMaps.Map.Patterns pattern;
+        switch ((category ?? "").Trim().ToUpperInvariant())
+        {
+            case "RA1": pattern = DisplayMaps.Map.Patterns.Dashed; break;
+            case "RA2": pattern = DisplayMaps.Map.Patterns.Dotted; break;
+            case "RA3": pattern = DisplayMaps.Map.Patterns.Solid; break;
+            default:
+                if (!Enum.TryParse(fallbackPattern, true, out pattern)) pattern = area.LinePattern;
+                break;
+        }
+
+        var categoryKnown = pattern == DisplayMaps.Map.Patterns.Dashed ||
+            pattern == DisplayMaps.Map.Patterns.Dotted || pattern == DisplayMaps.Map.Patterns.Solid;
+        if (!categoryKnown) return true;
+        var desiredDaiw = pattern != DisplayMaps.Map.Patterns.Dashed;
+
+        lock (_lock)
+        {
+            var state = GetOrCreateState(area.Name);
+            if (area.LinePattern != pattern)
+            {
+                state.OriginalLinePattern ??= area.LinePattern;
+                area.LinePattern = pattern;
+            }
+            if (area.DAIWEnabled != desiredDaiw)
+            {
+                state.OriginalDaiw ??= area.DAIWEnabled;
+                area.DAIWEnabled = desiredDaiw;
+            }
+        }
         RequestNativeMapRefresh();
         return true;
     }
@@ -657,12 +697,6 @@ public sealed class SuaAirspaceService : IDisposable
         SwapActivations(area, current => current.Add(activation));
         state.Injected = activation;
 
-        // Plugin-activated SUA always participates in DAIW warnings.
-        if (!area.DAIWEnabled)
-        {
-            state.OriginalDaiw = false;
-            area.DAIWEnabled = true;
-        }
     }
 
     private void RemoveInjection(RestrictedAreas.RestrictedArea area, ManualState state)
@@ -678,6 +712,12 @@ public sealed class SuaAirspaceService : IDisposable
         {
             area.DAIWEnabled = state.OriginalDaiw.Value;
             state.OriginalDaiw = null;
+        }
+
+        if (state.OriginalLinePattern.HasValue)
+        {
+            area.LinePattern = state.OriginalLinePattern.Value;
+            state.OriginalLinePattern = null;
         }
 
         if (state.OriginalInfillType.HasValue)
@@ -712,7 +752,8 @@ public sealed class SuaAirspaceService : IDisposable
     }
 
     private static bool CanDiscardState(ManualState state) =>
-        !state.HasSchedule && state.Injected is null && !state.HasLevelEdits;
+        !state.HasSchedule && state.Injected is null && !state.HasLevelEdits &&
+        !state.OriginalDaiw.HasValue && !state.OriginalLinePattern.HasValue && !state.OriginalInfillType.HasValue;
 
     private bool ResetToDataset(RestrictedAreas instance)
     {
@@ -786,6 +827,9 @@ public sealed class SuaAirspaceService : IDisposable
             .ThenBy(area => area.Name, StringComparer.OrdinalIgnoreCase)
             .Select(area =>
             {
+                if (area.LinePattern == DisplayMaps.Map.Patterns.Dashed) area.DAIWEnabled = false;
+                else if (area.LinePattern == DisplayMaps.Map.Patterns.Dotted || area.LinePattern == DisplayMaps.Map.Patterns.Solid)
+                    area.DAIWEnabled = true;
                 var defaultState = new RestrictedAreas.RestrictedArea(
                     area.Name, area.Type, area.AltitudeFloor, area.AltitudeCeiling)
                 {
@@ -863,6 +907,9 @@ public sealed class SuaAirspaceService : IDisposable
             // Only a genuine activation carries the controller's chosen draw
             // style to other clients; a level-only edit leaves borders alone.
             var linePattern = h24 || windows.Count > 0 ? area.LinePattern.ToString() : null;
+            if (linePattern == DisplayMaps.Map.Patterns.Dashed.ToString()) area.DAIWEnabled = false;
+            else if (linePattern == DisplayMaps.Map.Patterns.Dotted.ToString() || linePattern == DisplayMaps.Map.Patterns.Solid.ToString())
+                area.DAIWEnabled = true;
             result.Add(new ControllerActivation
             {
                 Name = area.Name,

@@ -133,13 +133,19 @@ function parseDatasetAreas(xml) {
         }
       }
     }
+    const linePattern = xmlAttr(attrs, "LinePattern").trim();
+    const raCategory = linePattern.toLowerCase() === "dashed" ? "RA1"
+      : (linePattern.toLowerCase() === "dotted" ? "RA2"
+        : (linePattern.toLowerCase() === "solid" ? "RA3" : null));
     areas.push({
       name,
       type: xmlAttr(attrs, "Type").trim(),
       floor: parseInt(xmlAttr(attrs, "AltitudeFloor"), 10) || 0,
       ceiling: parseInt(xmlAttr(attrs, "AltitudeCeiling"), 10) || 0,
-      daiw: xmlAttr(attrs, "DAIWEnabled").toLowerCase() === "true",
-      hidden: xmlAttr(attrs, "LinePattern") === "None",
+      daiw: raCategory ? raCategory !== "RA1" : xmlAttr(attrs, "DAIWEnabled").toLowerCase() === "true",
+      hidden: linePattern === "None",
+      linePattern,
+      raCategory,
       schedule: schedule.join(", "),
     });
   }
@@ -166,12 +172,14 @@ async function refreshAreas(env) {
     const statements = areas.slice(offset, offset + 50).map((area) => env.DB.prepare(
       `INSERT INTO areas
         (name, type, floor, ceiling, daiw, schedule, active, pre_active, hidden, manual,
-         h24_manual, scheduled, windows, levels_edited, last_seen)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 0, 0, 0, '[]', 0, ?)
+         h24_manual, scheduled, windows, levels_edited, line_pattern, ra_category, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 0, 0, 0, '[]', 0, ?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET
          type=excluded.type, floor=excluded.floor, ceiling=excluded.ceiling, daiw=excluded.daiw,
-         schedule=excluded.schedule, hidden=excluded.hidden, last_seen=excluded.last_seen`
-    ).bind(area.name, area.type, area.floor, area.ceiling, area.daiw ? 1 : 0, area.schedule, area.hidden ? 1 : 0, now));
+          schedule=excluded.schedule, hidden=excluded.hidden, line_pattern=excluded.line_pattern,
+          ra_category=excluded.ra_category, last_seen=excluded.last_seen`
+    ).bind(area.name, area.type, area.floor, area.ceiling, area.daiw ? 1 : 0, area.schedule,
+      area.hidden ? 1 : 0, area.linePattern, area.raCategory, now));
     if (statements.length) await env.DB.batch(statements);
   }
   await env.DB.batch([

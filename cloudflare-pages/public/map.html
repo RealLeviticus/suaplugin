@@ -165,7 +165,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
   }
 
   function loadGeometry(){
-    return fetch('/areas.geojson').then(function(r){ return r.json(); }).then(function(gj){
+    return fetch('/areas.geojson?v=20260718-types').then(function(r){ return r.json(); }).then(function(gj){
       geoLayer = L.geoJSON(gj, {
         style: function(f){ return styleFor(f.properties); },
         onEachFeature: function(f, layer){

@@ -343,7 +343,8 @@ button.danger-btn{border-color:#600000;color:#600000;}
       var html = '';
       for (var i = 0; i < requests.length; i++){
         var q = requests[i];
-        html += ""<div class='request-card'><div class='request-title'>"" + esc(q.AreaName) + ""</div>""
+        var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
+        html += ""<div class='request-card'><div class='request-title'>"" + esc(requestedNames.join(', ')) + ""</div>""
           + ""<div class='request-meta'>"" + esc(showRequestTime(q.StartUtc)) + "" &ndash; "" + esc(showRequestTime(q.EndUtc)) + "" &bull; REQUESTED BY "" + esc(q.Requester) + ""</div>""
           + (q.Notes ? ""<div class='request-notes'>"" + esc(q.Notes) + ""</div>"" : '')
           + ""<div class='request-actions'><button onclick=\""reviewRequest('"" + esc(q.Id) + ""','accept')\"">ACCEPT</button><button class='danger-btn' onclick=\""reviewRequest('"" + esc(q.Id) + ""','decline')\"">DECLINE</button></div></div>"";

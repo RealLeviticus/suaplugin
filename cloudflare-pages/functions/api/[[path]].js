@@ -342,12 +342,16 @@ async function setLevels(request, env) {
 async function createActivationRequest(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
-  const areaName = String(body?.AreaName || "").trim();
+  const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [body?.AreaName];
+  const areaNames = Array.from(new Set(submittedAreas.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 50);
   const requester = String(body?.Requester || "").trim().slice(0, 80);
   const notes = String(body?.Notes || "").trim().slice(0, 500);
   const start = new Date(String(body?.StartUtc || ""));
   const end = new Date(String(body?.EndUtc || ""));
-  if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
+  if (!areaNames.length) return json({ Success: false, Error: "Select at least one airspace area." }, 400);
+  for (const areaName of areaNames) {
+    if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
+  }
   if (!requester) return json({ Success: false, Error: "Your name or callsign is required." }, 400);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
     return json({ Success: false, Error: "Valid start and end times are required." }, 400);
@@ -360,21 +364,23 @@ async function createActivationRequest(request, env) {
   const now = new Date().toISOString();
   await env.DB.prepare(
     `INSERT INTO activation_requests
-       (id, area_name, requester, start_utc, end_utc, notes, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
-  ).bind(id, areaName, requester, start.toISOString(), end.toISOString(), notes, now).run();
+       (id, area_name, area_names, requester, start_utc, end_utc, notes, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, start.toISOString(), end.toISOString(), notes, now).run();
   return json({ Success: true, Id: id });
 }
 
 async function activationRequestsResponse(env) {
   const result = await env.DB.prepare(
-    `SELECT id, area_name, requester, start_utc, end_utc, notes, status, created_at, reviewed_at
+    `SELECT id, area_name, area_names, requester, start_utc, end_utc, notes, status, created_at, reviewed_at
        FROM activation_requests
       WHERE status = 'pending'
       ORDER BY start_utc, created_at`
   ).all();
   return json({ Success: true, Requests: (result.results || []).map((row) => ({
-    Id: row.id, AreaName: row.area_name, Requester: row.requester,
+    Id: row.id, AreaName: row.area_name,
+    AreaNames: (() => { const names = parseJson(row.area_names); return names.length ? names : [row.area_name]; })(),
+    Requester: row.requester,
     StartUtc: row.start_utc, EndUtc: row.end_utc, Notes: row.notes,
     Status: row.status, CreatedAt: row.created_at, ReviewedAt: row.reviewed_at,
   })) });
@@ -398,13 +404,15 @@ async function reviewActivationRequest(request, env) {
     const start = new Date(row.start_utc);
     const end = new Date(row.end_utc);
     if (end <= new Date()) return json({ Success: false, Error: "This request has already expired." }, 409);
-    statements.push(env.DB.prepare(
+    const requestedAreas = parseJson(row.area_names);
+    const areaNames = requestedAreas.length ? requestedAreas : [row.area_name];
+    for (const areaName of areaNames) statements.push(env.DB.prepare(
       `INSERT INTO desired_activations
          (name, source_type, source_id, h24, windows, expires_at, created_at, updated_at)
        VALUES (?, 'request', ?, 0, ?, ?, ?, ?)
        ON CONFLICT(name, source_type, source_id) DO UPDATE SET
          windows=excluded.windows, expires_at=excluded.expires_at, updated_at=excluded.updated_at`
-    ).bind(row.area_name, row.id, JSON.stringify([`${wireDate(start)}-${wireDate(end)}`]), end.toISOString(), now, now));
+    ).bind(areaName, row.id, JSON.stringify([`${wireDate(start)}-${wireDate(end)}`]), end.toISOString(), now, now));
   }
   statements.push(env.DB.prepare(
     "UPDATE activation_requests SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'"

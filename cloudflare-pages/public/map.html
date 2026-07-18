@@ -49,7 +49,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
   <div class="counts" id="counts">LOADING&hellip;</div>
   <div><span class="sw" style="background:#ffd21a;border-color:#f2c200;"></span>DANGER</div>
   <div><span class="sw" style="background:#ff3b30;border-color:#e02828;"></span>RESTRICTED / M</div>
-  <div class="sub">FILLED = ACTIVE &middot; FAINT = PRE-ACT &middot; OUTLINE = OFF</div>
+  <div class="sub">FILLED = ACTIVE &middot; FAINT = PRE-ACT &middot; OUTLINE = DEACTIVE</div>
   <div class="sub">BORDER STYLE = ACTIVATION DRAW</div>
 </div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -133,7 +133,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
   function popupHtml(props){
     var a = stateByName[props.name] || {};
     var status = a.Active ? '<span class="st-act">ACTIVE</span>'
-      : (a.PreActive ? '<span class="st-pre">PRE-ACTIVE</span>' : '<span class="st-off">OFF</span>');
+      : (a.PreActive ? '<span class="st-pre">PRE-ACTIVE</span>' : '<span class="st-off">DEACTIVE</span>');
     var html = '<div class="pn">' + props.name + '</div>'
       + (props.type || '').toUpperCase() + ' &middot; ' + lv(props.floor) + '&ndash;' + lv(props.ceiling) + '<br>'
       + 'STATUS: ' + status

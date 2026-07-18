@@ -133,16 +133,17 @@ button.danger-btn{border-color:#600000;color:#600000;}
       if (filter !== 'ALL' && a.Type.toUpperCase() !== filter) continue;
       if (search && a.Name.toUpperCase().indexOf(search) < 0) continue;
       shown++;
-      var status = a.Active ? "<span class='pill act'>ACTIVE</span>" : (a.PreActive ? "<span class='pill pre'>PREACT</span>" : "<span class='pill'>OFF</span>");
+      var status = a.Active ? "<span class='pill act'>ACTIVE</span>" : (a.PreActive ? "<span class='pill pre'>PREACT</span>" : "<span class='pill'>DEACTIVE</span>");
       if (a.Controller){
         var userLabel = 'USER';
         if (a.ControllerCids && a.ControllerCids.length) userLabel += ': ' + a.ControllerCids.join(', ');
         status += "<span class='pill user'>" + esc(userLabel) + "</span>";
       } else {
         if (a.Default) status += "<span class='pill def'>DEFAULT</span>";
-        if (a.Manual) status += "<span class='pill man'>MAN</span>";
+        // A DEFAULT (dataset-locked) area never shows shared-source MAN/SAVED tags.
+        if (a.Manual && !a.Default) status += "<span class='pill man'>MAN</span>";
         if (a.Scheduled && !a.Manual) status += "<span class='pill sched'>SCHED</span>";
-        if (a.Saved) status += "<span class='pill stage'>SAVED</span>";
+        if (a.Saved && !a.Default) status += "<span class='pill stage'>SAVED</span>";
       }
       var sched = a.Schedule ? esc(a.Schedule) : '';
       if (a.Windows.length){
@@ -295,40 +296,17 @@ button.danger-btn{border-color:#600000;color:#600000;}
       var n = notams[i];
       html += "<div class='nt-card'>"
         + "<div class='nt-title'>" + esc(n.Title) + " <span class='pill " + (n.Status === 'CURRENT' ? 'act' : 'pre') + "'>" + esc(n.Status) + "</span> "
-        + (n.Suppressed ? "<span class='pill def'>DEACTIVATED</span>" : "<span class='pill sched'>AUTO SAVED</span>") + "</div>"
+        + "<span class='pill sched'>AUTO SCHEDULED</span></div>"
         + "<div class='nt-dates'>" + esc((n.Start||'').replace('T',' ').substring(0,16)) + 'Z &ndash; ' + esc((n.End||'PERM').replace('T',' ').substring(0,16)) + "Z</div>"
         + "<div class='nt-des'>AREAS: " + esc(n.Designators.join(', ')) + "</div>";
       if (n.Windows.length)
         html += "<div class='nt-times'>TIMES: " + esc(n.Windows.join(', ')) + "</div>";
       if (n.Unmatched.length)
         html += "<div class='nt-unmatched'>NOT IN DATASET: " + esc(n.Unmatched.join(', ')) + "</div>";
-      html += "<button onclick='activateNotam(" + n.Id + ",\"now\")'>ACTIVATE NOW (" + n.Matched.length + ")</button>";
-      html += "<button class='danger-btn' onclick='deactivateNotam(" + n.Id + ")'>DEACTIVATE ALL (" + n.Matched.length + ")</button>";
-      if (n.Windows.length)
-        html += "<button onclick='activateNotam(" + n.Id + ",\"schedule\")'>SCHEDULE " + n.Windows.length + " TIMES</button>";
       html += "</div>";
     }
     el.innerHTML = html;
   }
-
-  window.activateNotam = function(id, mode){
-    document.getElementById('ntStatus').textContent = 'ACTIVATING...';
-    fetch('/api/sua/notams/activate?id=' + id + '&mode=' + mode, { method: 'POST' }).then(function(r){ return r.json(); }).then(function(d){
-      document.getElementById('ntStatus').textContent = d.Success ? ((d.Mode === 'schedule' ? 'SCHEDULED ' : 'ACTIVATED ') + d.Activated.length) : '';
-      setMsg(d.Success ? '' : (d.Error || 'NOTAM activation failed.'));
-      refresh(true);
-    }).catch(function(e){ document.getElementById('ntStatus').textContent = ''; setMsg(e.message || 'NOTAM activation failed.'); });
-  };
-
-  window.deactivateNotam = function(id){
-    document.getElementById('ntStatus').textContent = 'DEACTIVATING...';
-    fetch('/api/sua/notams/deactivate?id=' + id, { method: 'POST' }).then(function(r){ return r.json(); }).then(function(d){
-      document.getElementById('ntStatus').textContent = d.Success ? ('DEACTIVATED ' + d.Deactivated.length) : '';
-      setMsg(d.Success ? '' : (d.Error || 'NOTAM deactivation failed.'));
-      refresh(true);
-      scanNotams();
-    }).catch(function(e){ document.getElementById('ntStatus').textContent = ''; setMsg(e.message || 'NOTAM deactivation failed.'); });
-  };
 
   function scanNotams(){
     document.getElementById('ntStatus').textContent = 'LOADING...';

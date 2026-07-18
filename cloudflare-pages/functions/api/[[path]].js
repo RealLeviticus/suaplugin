@@ -163,6 +163,29 @@ async function activeControllerCids(db, name) {
   return Array.from(new Set((result.results || []).map((row) => row.controller_cid).filter(Boolean)));
 }
 
+// Default (dataset) timing computed from the catalogue's schedule string
+// ("H24" or comma-separated "HHmm-HHmm" daily windows) at read time, so the
+// stored catalogue never needs per-minute rewrites to track default state.
+function defaultTiming(schedule, now) {
+  const parts = String(schedule || "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (!parts.length) return { active: false, preActive: false };
+  const nowMin = now.getUTCHours() * 60 + now.getUTCMinutes();
+  let active = false;
+  let preActive = false;
+  for (const part of parts) {
+    if (part.toUpperCase() === "H24") return { active: true, preActive: true };
+    const match = part.match(/^(\d{2})(\d{2})-(\d{2})(\d{2})$/);
+    if (!match) continue;
+    const start = Number(match[1]) * 60 + Number(match[2]);
+    const end = Number(match[3]) * 60 + Number(match[4]);
+    const inWindow = end > start ? (nowMin >= start && nowMin < end) : (nowMin >= start || nowMin < end);
+    if (inWindow) active = true;
+    const minsUntilStart = (start - nowMin + 1440) % 1440;
+    if (minsUntilStart > 0 && minsUntilStart <= 15) preActive = true;
+  }
+  return { active, preActive: active || preActive };
+}
+
 function desiredTiming(item) {
   if (!item) return { active: false, preActive: false };
   if (item.H24) return { active: true, preActive: true };
@@ -187,6 +210,7 @@ async function areasResponse(env) {
     loadDesired(env.DB),
   ]);
   const desiredByName = new Map(desired.map((item) => [item.Name, item]));
+  const now = new Date();
 
   const areas = (areasResult.results || []).map((row) => {
     const staged = desiredByName.get(row.name);
@@ -198,8 +222,9 @@ async function areasResponse(env) {
       .filter((source) => source.Type === "controller" && source.Cid)
       .map((source) => source.Cid)));
     const saved = Boolean(staged?.Sources?.some((source) => source.Type !== "controller"));
-    const defaultActive = !Boolean(row.manual) && Boolean(row.active);
-    const defaultPreActive = !Boolean(row.manual) && Boolean(row.pre_active);
+    const dflt = defaultTiming(row.schedule, now);
+    const defaultActive = !Boolean(row.manual) && dflt.active;
+    const defaultPreActive = !Boolean(row.manual) && dflt.preActive;
     return {
       Name: row.name,
       Type: row.type,
@@ -404,28 +429,12 @@ async function pluginSync(request, env) {
   const catalogueLoaded = snapshot?.Loaded === true && Array.isArray(snapshot?.Areas) && snapshot.Areas.length > 0;
   const areas = catalogueLoaded ? snapshot.Areas : [];
 
-  for (let offset = 0; offset < areas.length; offset += 50) {
-    const statements = areas.slice(offset, offset + 50).map((area) => env.DB.prepare(
-      `INSERT INTO areas
-        (name, type, floor, ceiling, daiw, schedule, active, pre_active, hidden, manual,
-         h24_manual, scheduled, windows, levels_edited, last_seen)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(name) DO UPDATE SET
-         type=excluded.type, floor=excluded.floor, ceiling=excluded.ceiling, daiw=excluded.daiw,
-         schedule=excluded.schedule, active=excluded.active, pre_active=excluded.pre_active,
-         hidden=excluded.hidden, manual=excluded.manual, h24_manual=excluded.h24_manual,
-         scheduled=excluded.scheduled, windows=excluded.windows, levels_edited=excluded.levels_edited,
-         last_seen=excluded.last_seen`
-    ).bind(area.Name, area.Type, area.Floor, area.Ceiling, area.Daiw ? 1 : 0, area.Schedule || "",
-      area.Active ? 1 : 0, area.PreActive ? 1 : 0, area.Hidden ? 1 : 0, area.Manual ? 1 : 0,
-      area.H24Manual ? 1 : 0, area.Scheduled ? 1 : 0, JSON.stringify(area.Windows || []),
-      area.LevelsEdited ? 1 : 0, syncTime));
-    if (statements.length) await env.DB.batch(statements);
-  }
-
-  // The catalogue is shared by every website user and plugin installation.
-  // A plugin may add or refresh entries, but must never prune entries supplied
-  // by another installation just because its local profile differs.
+  // The area catalogue is owned by the scheduled Worker, sourced from the
+  // canonical vatSys GitHub dataset — the plugin no longer writes it. This
+  // keeps the shared list consistent with what the division intends regardless
+  // of a controller's local RestrictedAreas.xml, and removes the per-sync
+  // 580-row upsert that dominated D1 write usage. The plugin's own area names
+  // are still used below only to validate its controller activations.
   if (catalogueLoaded) {
     await env.DB.prepare(
       "INSERT INTO metadata(key, value) VALUES('plugin_last_seen', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
@@ -466,20 +475,13 @@ export async function onRequest(context) {
       return json({ Success: true, Name: name, Staged: false });
     }
     if (path === "/sua/deactivateall") {
-      const notams = await context.env.DB.prepare(
-        "SELECT id FROM notams WHERE end_utc IS NULL OR end_utc > ?"
-      ).bind(new Date().toISOString()).all();
+      // Clears shared website/manual activations only. Airspace NOTAMs are always
+      // auto-scheduled from their listed times, so they are not paused here and
+      // re-stage automatically on the next automation run.
       const now = new Date().toISOString();
-      const statements = [context.env.DB.prepare(
+      await context.env.DB.prepare(
         "DELETE FROM desired_activations WHERE source_type <> 'controller' OR expires_at <= ?"
-      ).bind(now)];
-      for (const row of notams.results || []) {
-        statements.push(context.env.DB.prepare(
-          `INSERT INTO notam_deactivations(notam_id, created_at) VALUES (?, ?)
-           ON CONFLICT(notam_id) DO UPDATE SET created_at=excluded.created_at`
-        ).bind(row.id, now));
-      }
-      await runStatements(context.env.DB, statements);
+      ).bind(now).run();
       return json({ Success: true });
     }
     if (path === "/sua/windows") return setWindows(context.request, context.env);

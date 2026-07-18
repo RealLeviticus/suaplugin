@@ -5,11 +5,12 @@ A vatSys plugin and public Cloudflare control page for staging and applying Aust
 ## Features
 
 - Public control page at `https://sua.actuallyleviticus.xyz/`; no browser operator key is required.
-- Full-screen airspace map at `https://sua.actuallyleviticus.xyz/map` plots every Danger/Restricted area over Australia and highlights active (red) and pre-active (amber) areas live, refreshing every five seconds. Geometry is a static `areas.geojson` asset generated from the profile's `RestrictedAreas.xml`; the map (Leaflet with CARTO/OpenStreetMap tiles) joins it to the live shared state by area name.
+- Full-screen airspace map at `https://sua.actuallyleviticus.xyz/map` plots every Danger/Restricted area over Australia and highlights it live (Danger yellow, Restricted/M red; filled = active, faint = pre-active, outline = deactive), refreshing every five seconds. Each border matches the area's activation draw style. Geometry is a static `areas.geojson` asset generated from the canonical GitHub dataset; the map (Leaflet with CARTO/OpenStreetMap tiles) joins it to the live shared state by area name.
 - Activations, time windows, and level edits are written directly to shared Cloudflare D1 storage. The public website operates independently of every plugin installation.
 - Each plugin is a reader of the shared desired state and applies it locally when it syncs. No inbound tunnel or router port-forward is used.
-- Each plugin uploads an immutable copy of the profile's SUA catalogue and original default schedules, plus genuine controller-created activations and level changes from the vatSys Restricted Area window. Cloud-injected activations are excluded so they cannot feed back into the shared state.
-- A scheduled Cloudflare Worker refreshes VATPAC airspace NOTAMs every minute, expands compressed designators such as `R225ABCDEF`, matches the active dataset, and stages the published activation windows automatically.
+- The shared area catalogue and default schedules are owned by the scheduled Worker, which pulls the canonical [vatSys australia-dataset `RestrictedAreas.xml`](https://github.com/vatSys/australia-dataset/blob/master/RestrictedAreas.xml) — so the website always reflects what the division intends, regardless of whatever `RestrictedAreas.xml` a controller has loaded locally. Plugins upload only their genuine controller-created activations and level changes from the vatSys Restricted Area window (cloud-injected activations are excluded so they cannot feed back). Plugins no longer write the catalogue, which removed the dominant source of D1 write usage.
+- The Worker writes the catalogue and NOTAM state only when their content hashes change, so steady-state D1 reads/writes are near zero even though it runs every minute. Default active/pre-active state is computed from each area's schedule at read time, so the stored catalogue never needs per-minute rewrites.
+- A scheduled Cloudflare Worker refreshes VATPAC airspace NOTAMs every minute, expands compressed designators such as `R225ABCDEF`, matches the dataset, and schedules the published activation windows automatically.
 - Plugin activations use vatSys's standard restricted-area colour with no plugin-added infill.
 - Each SUA border keeps the line pattern defined in the dataset, and controllers can change how an area is drawn from the vatSys Restricted Area window.
 - When a controller activates an area, their selected line pattern is shared to other connected controllers. A controller who did not activate the area can still restyle it locally without changing anyone else's display; the activating controller's pattern only reapplies if they change it again.
@@ -28,17 +29,17 @@ Open `https://sua.actuallyleviticus.xyz/`.
 - Controllers connected with the OBS facility can view dataset and shared SUA, but cannot retain or publish Restricted Area activations, regardless of their underlying VATSIM certification rating. Local OBS changes are restored to the dataset/shared state and the cloud API ignores OBS controller activations.
 - Controller-created areas show `USER LOCKED` instead of website controls and cannot be deactivated through individual, global, or NOTAM actions while their originating controller remains connected.
 - `DEFAULT` is profile-defined. Its action column contains a full-width `DATASET LOCKED` box in place of ACT and EDIT, and neither website nor controller-synchronisation actions can remove it.
-- The NOTAM panel is refreshed automatically. Current and upcoming airspace NOTAM windows are saved by the scheduled Worker; each NOTAM can also activate or deactivate all matched areas explicitly.
-- `CLEAR SHARED ACTIVATIONS` clears desired state and pauses current NOTAM auto-staging until an area or NOTAM is explicitly activated again. It never changes default activations.
+- The NOTAM panel is informational and refreshed automatically. Every matched airspace NOTAM is scheduled from its listed times by the scheduled Worker and re-staged on each run, so it stays scheduled for its whole life. There are no manual activate/deactivate controls — matched areas activate and deactivate automatically as each NOTAM window opens and closes.
+- `CLEAR SHARED ACTIVATIONS` clears shared website/manual activations. It never changes default activations, and it no longer pauses NOTAMs — airspace NOTAMs always remain auto-scheduled and re-stage on the next automation run.
 
 The local `http://localhost:5300/` endpoint is loopback-only and redirects to the public page. Plugin synchronisation uses the public Cloudflare API and requires no operator or machine key, so the same release can be copied directly to other controllers.
 
 ## Architecture
 
 1. Cloudflare Pages serves the UI and Pages Functions API.
-2. Pages Functions store the most recent dataset snapshot and desired activation sources in D1.
-3. The automation Worker reads VATPAC's CMS feed every minute and writes matched NOTAM windows to D1.
-4. When vatSys finishes loading Restricted Areas, each plugin captures the full Danger/Restricted catalogue and original default schedules. Every five seconds it uploads that dataset plus local controller-created differences and reads the aggregated desired state.
+2. Pages Functions store desired activation sources in D1 and serve the aggregated shared state.
+3. The automation Worker runs every minute: it pulls the canonical vatSys `RestrictedAreas.xml` from GitHub into the `areas` catalogue and reads VATPAC's CMS feed for matched NOTAM windows. Both are content-hashed, so it only writes to D1 when the dataset or NOTAM feed actually changes.
+4. Each plugin reads the aggregated desired state every five seconds and uploads only its genuine controller-created activations and level differences (not the catalogue).
 5. Each installation has a generated ID. Cloudflare replaces that installation's leased `controller` sources on every sync, and the originating plugin excludes its own sources from the response to avoid echoing them back into vatSys.
 6. Cloud synchronisation and SUA display changes remain dormant until vatSys connects to VATSIM. On disconnect the plugin immediately clears its leased controller sources, removes shared injections and manual local activations, and restores the captured dataset state.
 7. While connected, the plugin injects/removes shared plugin activations and calls the same native `DisplayMaps.UpdateDynamicRMaps()` path used by vatSys. Missing dataset-default schedules are restored and cannot be removed. An activating controller uploads their selected line pattern alongside the activation; each installation applies a shared line pattern only when it changes, so a local restyle by a non-activating controller is never overwritten or re-uploaded.
@@ -97,11 +98,11 @@ Pop-Location
 wrangler deploy --config .\cloudflare-automation\wrangler.toml
 ```
 
-`build-map.ps1` regenerates `cloudflare-pages/public/areas.geojson` from the active
-profile's `RestrictedAreas.xml` (default
-`Documents\vatSys Files\Profiles\Australia\RestrictedAreas.xml`; override with
-`-RestrictedAreasXml`). Re-run it whenever the profile's restricted-area geometry
-changes with an AIRAC/profile update, then redeploy Pages.
+`build-map.ps1` regenerates `cloudflare-pages/public/areas.geojson` from the
+canonical vatSys GitHub dataset by default (override the source with
+`-RestrictedAreasSource`, which also accepts a local file path). Re-run it when
+the dataset's restricted-area geometry changes with an AIRAC update, then
+redeploy Pages.
 
 The automation Worker's manual `/refresh` endpoint still uses its private `SUA_SYNC_TOKEN` secret. Plugin synchronisation and the public website do not use that secret.
 

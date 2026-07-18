@@ -89,19 +89,108 @@ function matchAreas(designators, areaNames) {
   return { matched, unmatched };
 }
 
+const DATASET_URL = "https://raw.githubusercontent.com/vatSys/australia-dataset/master/RestrictedAreas.xml";
+
+// FNV-1a 32-bit: a cheap stable content hash used to skip DB work when neither
+// the division dataset nor the NOTAM feed has changed since the last run.
+function fnv1a(str) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function xmlAttr(tag, name) {
+  const match = tag.match(new RegExp(`${name}="([^"]*)"`));
+  return match ? match[1] : "";
+}
+
+// Parse the vatSys australia-dataset RestrictedAreas.xml into catalogue rows.
+function parseDatasetAreas(xml) {
+  const areas = [];
+  const blockRegex = /<RestrictedArea\b([^>]*)>([\s\S]*?)<\/RestrictedArea>/g;
+  let block;
+  while ((block = blockRegex.exec(xml))) {
+    const attrs = block[1];
+    const inner = block[2];
+    const name = xmlAttr(attrs, "Name").trim();
+    if (!name) continue;
+    const schedule = [];
+    const activationRegex = /<Activation\b([^>]*)\/>/g;
+    let act;
+    while ((act = activationRegex.exec(inner))) {
+      const a = act[1];
+      if (xmlAttr(a, "H24").toLowerCase() === "true") {
+        if (!schedule.includes("H24")) schedule.push("H24");
+      } else {
+        const start = xmlAttr(a, "Start");
+        const end = xmlAttr(a, "End");
+        if (/^\d{4}$/.test(start) && /^\d{4}$/.test(end)) {
+          const token = `${start}-${end}`;
+          if (!schedule.includes(token)) schedule.push(token);
+        }
+      }
+    }
+    areas.push({
+      name,
+      type: xmlAttr(attrs, "Type").trim(),
+      floor: parseInt(xmlAttr(attrs, "AltitudeFloor"), 10) || 0,
+      ceiling: parseInt(xmlAttr(attrs, "AltitudeCeiling"), 10) || 0,
+      daiw: xmlAttr(attrs, "DAIWEnabled").toLowerCase() === "true",
+      hidden: xmlAttr(attrs, "LinePattern") === "None",
+      schedule: schedule.join(", "),
+    });
+  }
+  return areas;
+}
+
+// The website's restricted-area catalogue comes from the canonical vatSys
+// dataset on GitHub, not from whatever RestrictedAreas.xml a controller has
+// loaded. A content hash means the 580 rows are only rewritten when the
+// division actually changes the dataset, so steady-state D1 writes are zero.
+async function refreshAreas(env) {
+  const response = await fetch(DATASET_URL, { headers: { Accept: "application/xml", "User-Agent": "SUA-Airspace-Cloudflare/1.0" } });
+  if (!response.ok) throw new Error(`Dataset request failed with ${response.status}`);
+  const xml = await response.text();
+  const hash = fnv1a(xml);
+  const stored = await env.DB.prepare("SELECT value FROM metadata WHERE key = 'dataset_hash'").first();
+  if (stored && stored.value === hash) return { Success: true, Areas: 0, Unchanged: true };
+
+  const areas = parseDatasetAreas(xml);
+  if (areas.length < 100) throw new Error(`Dataset parse returned only ${areas.length} areas; refusing to overwrite.`);
+
+  const now = new Date().toISOString();
+  for (let offset = 0; offset < areas.length; offset += 50) {
+    const statements = areas.slice(offset, offset + 50).map((area) => env.DB.prepare(
+      `INSERT INTO areas
+        (name, type, floor, ceiling, daiw, schedule, active, pre_active, hidden, manual,
+         h24_manual, scheduled, windows, levels_edited, last_seen)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 0, 0, 0, '[]', 0, ?)
+       ON CONFLICT(name) DO UPDATE SET
+         type=excluded.type, floor=excluded.floor, ceiling=excluded.ceiling, daiw=excluded.daiw,
+         schedule=excluded.schedule, hidden=excluded.hidden, last_seen=excluded.last_seen`
+    ).bind(area.name, area.type, area.floor, area.ceiling, area.daiw ? 1 : 0, area.schedule, area.hidden ? 1 : 0, now));
+    if (statements.length) await env.DB.batch(statements);
+  }
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO metadata(key, value) VALUES('dataset_hash', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(hash),
+    // Force the NOTAM matcher to re-run against the new catalogue.
+    env.DB.prepare("DELETE FROM metadata WHERE key = 'notam_fingerprint'"),
+  ]);
+  return { Success: true, Areas: areas.length, Unchanged: false };
+}
+
 async function refresh(env) {
   const response = await fetch(NOTAM_URL, { headers: { Accept: "application/json", "User-Agent": "SUA-Airspace-Cloudflare/1.0" } });
   if (!response.ok) throw new Error(`VATPAC NOTAM request failed with ${response.status}`);
   const payload = await response.json();
-  const [areaResult, suppressionResult] = await Promise.all([
-    env.DB.prepare("SELECT name FROM areas").all(),
-    env.DB.prepare("SELECT notam_id FROM notam_deactivations").all(),
-  ]);
-  const areaNames = (areaResult.results || []).map((row) => row.name);
-  const suppressedNotamIds = new Set((suppressionResult.results || []).map((row) => String(row.notam_id)));
   const now = new Date();
-  const parsed = [];
 
+  // Extract airspace NOTAM essentials without touching the DB so an unchanged
+  // upstream feed skips every read and write below.
+  const extracted = [];
   for (const item of payload.data || []) {
     const attrs = item.attributes || {};
     if (!String(attrs.type || "").toLowerCase().includes("airspace")) continue;
@@ -110,15 +199,30 @@ async function refresh(env) {
     const content = decodeHtml(attrs.content);
     const designators = extractDesignators(content);
     if (!designators.length) continue;
-    const { matched, unmatched } = matchAreas(designators, areaNames);
     let windows = extractWindows(content).filter((window) => window.slice(13) > wireDate(now));
     const start = parseCmsDate(attrs.start);
     if (!windows.length && end && end > now) windows = [`${wireDate(start && start > now ? start : now)}-${wireDate(end)}`];
-    parsed.push({
+    extracted.push({
       id: String(item.id || ""), title: String(attrs.title || ""), startText: String(attrs.start || ""),
-      endText: String(attrs.end || ""), start, end, designators, matched, unmatched, windows,
+      endText: String(attrs.end || ""), start, end, designators, content, windows,
     });
   }
+
+  const datasetHashRow = await env.DB.prepare("SELECT value FROM metadata WHERE key = 'dataset_hash'").first();
+  const fingerprint = fnv1a(JSON.stringify(extracted.map((item) =>
+    [item.id, item.title, item.designators, item.windows, item.end ? item.end.toISOString() : null])) +
+    "|" + (datasetHashRow ? datasetHashRow.value : ""));
+  const storedFingerprint = await env.DB.prepare("SELECT value FROM metadata WHERE key = 'notam_fingerprint'").first();
+  if (storedFingerprint && storedFingerprint.value === fingerprint) {
+    return { Success: true, Notams: extracted.length, Unchanged: true };
+  }
+
+  const areaResult = await env.DB.prepare("SELECT name FROM areas").all();
+  const areaNames = (areaResult.results || []).map((row) => row.name);
+  const parsed = extracted.map((item) => {
+    const { matched, unmatched } = matchAreas(item.designators, areaNames);
+    return { ...item, matched, unmatched };
+  });
 
   const refreshedAt = new Date().toISOString();
   const statements = [env.DB.prepare("DELETE FROM desired_activations WHERE source_type = 'notam'")];
@@ -143,7 +247,8 @@ async function refresh(env) {
       item.end?.toISOString() || null, JSON.stringify(item.designators), JSON.stringify(item.matched),
       JSON.stringify(item.unmatched), JSON.stringify(item.windows), refreshedAt));
 
-    if (suppressedNotamIds.has(item.id)) continue;
+    // Every matched airspace NOTAM is scheduled automatically from its listed
+    // windows and re-staged on each run, so it stays scheduled for its life.
     for (const name of item.matched) {
       if (!item.windows.length) continue;
       statements.push(env.DB.prepare(
@@ -153,26 +258,38 @@ async function refresh(env) {
       ).bind(name, item.id, JSON.stringify(item.windows), item.end?.toISOString() || null, refreshedAt, refreshedAt));
     }
   }
-  await env.DB.batch(statements);
-  await env.DB.prepare(
+  statements.push(env.DB.prepare(
+    "INSERT INTO metadata(key, value) VALUES('notam_fingerprint', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+  ).bind(fingerprint));
+  statements.push(env.DB.prepare(
     "INSERT INTO metadata(key, value) VALUES('notams_last_refreshed', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-  ).bind(refreshedAt).run();
+  ).bind(refreshedAt));
+  await env.DB.batch(statements);
   return {
     Success: true,
     Notams: parsed.length,
-    AutoStagedAreas: parsed.reduce(
-      (sum, item) => sum + (suppressedNotamIds.has(item.id) ? 0 : item.matched.length), 0),
+    AutoStagedAreas: parsed.reduce((sum, item) => sum + item.matched.length, 0),
   };
 }
 
+// Refresh the catalogue first (so NOTAM matching sees the current dataset), then
+// the NOTAMs. Each is independent — one failing must not block the other.
+async function refreshAll(env) {
+  const results = {};
+  try { results.Areas = await refreshAreas(env); }
+  catch (error) { results.Areas = { Success: false, Error: error?.message || "Areas refresh failed." }; }
+  try { results.Notams = await refresh(env); }
+  catch (error) { results.Notams = { Success: false, Error: error?.message || "NOTAM refresh failed." }; }
+  return results;
+}
+
 export default {
-  async scheduled(_controller, env, context) { context.waitUntil(refresh(env)); },
+  async scheduled(_controller, env, context) { context.waitUntil(refreshAll(env)); },
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname !== "/refresh") return new Response("Not found", { status: 404 });
     if (!env.SUA_SYNC_TOKEN || request.headers.get("X-SUA-Sync-Token") !== env.SUA_SYNC_TOKEN)
       return Response.json({ Success: false, Error: "Unauthorized." }, { status: 401 });
-    try { return Response.json(await refresh(env)); }
-    catch (error) { return Response.json({ Success: false, Error: error?.message || "Refresh failed." }, { status: 500 }); }
+    return Response.json(await refreshAll(env));
   },
 };

@@ -1,23 +1,31 @@
 <#
 .SYNOPSIS
-Generates cloudflare-pages/public/areas.geojson from a vatSys profile's
-RestrictedAreas.xml so the website map can draw every Danger/Restricted area.
+Generates cloudflare-pages/public/areas.geojson from the canonical vatSys
+australia-dataset RestrictedAreas.xml so the website map draws every
+Danger/Restricted area exactly as the division intends.
 
-Geometry is static (it only changes with an AIRAC/profile update), so it is
-baked into a static asset served by Cloudflare Pages rather than uploaded on
-every plugin sync. Re-run this whenever the profile's RestrictedAreas.xml
-changes, then redeploy Pages.
+Source defaults to the GitHub dataset (so the map is not tied to whatever
+RestrictedAreas.xml a controller has loaded locally); pass a local file path to
+-RestrictedAreasSource to override. Geometry only changes with an AIRAC/dataset
+update, so it is baked into a static asset. Re-run this then redeploy Pages when
+the dataset changes.
 #>
 param(
-    [string]$RestrictedAreasXml = (Join-Path $env:USERPROFILE "Documents\vatSys Files\Profiles\Australia\RestrictedAreas.xml"),
+    [string]$RestrictedAreasSource = "https://raw.githubusercontent.com/vatSys/australia-dataset/master/RestrictedAreas.xml",
     [string]$OutputPath = (Join-Path $PSScriptRoot "cloudflare-pages\public\areas.geojson")
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path -LiteralPath $RestrictedAreasXml)) {
-    throw "RestrictedAreas.xml not found at '$RestrictedAreasXml'. Pass -RestrictedAreasXml with the correct profile path."
+if ($RestrictedAreasSource -match '^https?://') {
+    $content = (Invoke-WebRequest -Uri $RestrictedAreasSource -UseBasicParsing).Content
+    $xmlText = if ($content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($content) } else { [string]$content }
+} elseif (Test-Path -LiteralPath $RestrictedAreasSource) {
+    $xmlText = Get-Content -LiteralPath $RestrictedAreasSource -Raw
+} else {
+    throw "RestrictedAreas source '$RestrictedAreasSource' is neither a reachable URL nor an existing file."
 }
+$xmlText = $xmlText.TrimStart([char]0xFEFF)
 
 # One coordinate token is "<lat><lon>", e.g. "-214700.000+1140930.000":
 #   lat = sign + DDMMSS.sss   (2-digit degrees, 6 integer digits)
@@ -34,7 +42,7 @@ function ConvertTo-Decimal {
     return $sign * ($deg + $min / 60.0 + $sec / 3600.0)
 }
 
-[xml]$doc = Get-Content -LiteralPath $RestrictedAreasXml -Raw
+[xml]$doc = $xmlText
 $features = New-Object System.Collections.Generic.List[object]
 $skipped = 0
 

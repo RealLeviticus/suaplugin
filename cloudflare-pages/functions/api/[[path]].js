@@ -502,17 +502,33 @@ async function createActivationRequest(request, env, session = null) {
     session?.vatsim_cid || null, session?.vatsim_name || null, now).run();
   let discordNotified = false;
   if (env.DISCORD_REQUEST_WEBHOOK_URL) {
+    const categoryColor = raCategory === "RA1" ? 0x008040 : (raCategory === "RA2" ? 0xd0b000 : 0xc00000);
+    const categoryStyle = raCategory === "RA1" ? "Dashed line · DAIW off"
+      : (raCategory === "RA2" ? "Dotted line · DAIW on" : "Solid line · DAIW on");
+    const startUnix = Math.floor(start.getTime() / 1000), endUnix = Math.floor(end.getTime() / 1000);
+    const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    const duration = durationMinutes >= 60 && durationMinutes % 60 === 0
+      ? `${durationMinutes / 60} hour${durationMinutes === 60 ? "" : "s"}`
+      : `${durationMinutes} minutes`;
+    const requesterIdentity = session?.vatsim_cid
+      ? `**${requester}**\n${session.vatsim_name ? `${session.vatsim_name} · ` : ""}VATSIM CID ${session.vatsim_cid}`
+      : `**${requester}**`;
     const fields = [
-      { name: "Airspace", value: areaNames.join(", ").slice(0, 1024) || "-", inline: false },
-      { name: "Category", value: raCategory, inline: true },
-      { name: "Requester", value: requester + (session?.vatsim_cid ? ` (CID ${session.vatsim_cid})` : ""), inline: true },
-      { name: "Start", value: start.toISOString().replace(".000", ""), inline: true },
-      { name: "End", value: end.toISOString().replace(".000", ""), inline: true },
+      { name: `Requested airspace (${areaNames.length})`, value: areaNames.map((name) => `• **${name}**`).join("\n").slice(0, 1024), inline: false },
+      { name: "RA category", value: `**${raCategory}**\n${categoryStyle}`, inline: true },
+      { name: "Duration", value: `**${duration}**`, inline: true },
+      { name: "Requested by", value: requesterIdentity.slice(0, 1024), inline: false },
+      { name: "Starts", value: `<t:${startUnix}:F>\n<t:${startUnix}:R>`, inline: true },
+      { name: "Ends", value: `<t:${endUnix}:F>\n<t:${endUnix}:R>`, inline: true },
     ];
     if (notes) fields.push({ name: "Notes", value: notes.slice(0, 1024), inline: false });
     try {
       const webhookResponse = await fetch(env.DISCORD_REQUEST_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ embeds: [{ title: "New SUA activation request", color: 3447003, fields, timestamp: now }] }) });
+        body: JSON.stringify({ username: "SUA Airspace Requests", allowed_mentions: { parse: [] }, embeds: [{
+          author: { name: "SUA AIRSPACE · NEW REQUEST" }, title: `${raCategory} activation requested`,
+          url: "https://sua.actuallyleviticus.xyz/", description: "A new activation request is waiting for controller review.",
+          color: categoryColor, fields, footer: { text: `Request ID · ${id}` }, timestamp: now,
+        }] }) });
       discordNotified = webhookResponse.ok;
     } catch { /* A notification failure must not lose the stored request. */ }
   }

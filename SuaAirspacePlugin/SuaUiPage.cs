@@ -443,12 +443,21 @@ button.danger-btn{border-color:#600000;color:#600000;}
   document.getElementById('closeRequests').onclick = function(){ document.getElementById('requestPanel').className = 'request-panel'; };
   document.getElementById('requestPanel').onclick = function(e){ if (e.target === this) this.className = 'request-panel'; };
 
-  refresh(true);
-  scanNotams();
-  loadRequests();
-  setInterval(function(){ refresh(false); }, 5000);
-  setInterval(scanNotams, 60000);
-  setInterval(loadRequests, 30000);
+  function startControlPage(){
+    refresh(true);
+    scanNotams();
+    loadRequests();
+    setInterval(function(){ refresh(false); }, 5000);
+    setInterval(scanNotams, 60000);
+    setInterval(loadRequests, 30000);
+  }
+  fetch('/api/auth/session').then(function(r){ return r.json(); }).then(function(d){
+    if (!d.AuthEnabled || d.Authorized){ startControlPage(); return; }
+    var message = d.Authenticated
+      ? 'Your VATSIM account does not have permission to manage airspace.'
+      : 'Log in with an authorised VATSIM account to manage airspace.';
+    document.body.innerHTML = ""<div style='max-width:620px;margin:15vh auto;padding:24px;border:3px solid #5a6a6a;background:#8f9c9c;text-align:center'><h1 style='color:#000060;font-size:18px'>SUA AIRSPACE</h1><p style='margin:18px 0'>"" + esc(message) + ""</p><a class='maplink' style='display:inline-block;border:2px solid #5a6a6a;padding:8px;color:#000060' href='"" + (d.Authenticated ? '/api/auth/logout' : '/api/auth/login?return=%2F') + ""'>"" + (d.Authenticated ? 'LOG OUT' : 'LOG IN WITH VATSIM') + ""</a></div>"";
+  }).catch(function(){ document.body.innerHTML = ""<div class='msg'>Authentication service unavailable.</div>""; });
 })();
 </script>
 </body>

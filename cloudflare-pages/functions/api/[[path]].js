@@ -41,6 +41,108 @@ function requestedPath(context) {
   return "/" + (Array.isArray(path) ? path.join("/") : String(path || ""));
 }
 
+function authEnabled(env) {
+  return String(env.VATSIM_AUTH_REQUIRED || "").toLowerCase() === "true";
+}
+
+function cookieValue(request, name) {
+  const cookie = request.headers.get("Cookie") || "";
+  for (const part of cookie.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(value.join("="));
+  }
+  return "";
+}
+
+async function sha256(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function currentSession(request, env) {
+  const token = cookieValue(request, "sua_session");
+  if (!token) return null;
+  return env.DB.prepare(
+    "SELECT vatsim_cid, vatsim_name, expires_at FROM auth_sessions WHERE token_hash = ? AND expires_at > ?"
+  ).bind(await sha256(token), new Date().toISOString()).first();
+}
+
+function controllerCids(env) {
+  return new Set(String(env.AUTHORIZED_VATSIM_CIDS || "").split(",").map((value) => value.trim()).filter(Boolean));
+}
+
+async function authSessionResponse(request, env) {
+  const session = await currentSession(request, env);
+  return json({ Success: true, AuthEnabled: authEnabled(env), Authenticated: Boolean(session),
+    Authorized: Boolean(session && controllerCids(env).has(String(session.vatsim_cid))),
+    Cid: session?.vatsim_cid || "", Name: session?.vatsim_name || "" });
+}
+
+async function beginVatsimLogin(request, env) {
+  if (!env.VATSIM_CLIENT_ID || !env.VATSIM_REDIRECT_URI) return json({ Success: false, Error: "VATSIM OAuth is not configured." }, 503);
+  const requestUrl = new URL(request.url);
+  const returnTo = (requestUrl.searchParams.get("return") || "/request").startsWith("/")
+    ? requestUrl.searchParams.get("return") || "/request" : "/request";
+  const state = crypto.randomUUID();
+  await env.DB.prepare("DELETE FROM oauth_states WHERE expires_at <= ?").bind(new Date().toISOString()).run();
+  await env.DB.prepare("INSERT INTO oauth_states(state, return_to, expires_at) VALUES (?, ?, ?)")
+    .bind(state, returnTo, new Date(Date.now() + 10 * 60 * 1000).toISOString()).run();
+  const target = new URL("https://auth.vatsim.net/oauth/authorize");
+  target.searchParams.set("response_type", "code"); target.searchParams.set("client_id", env.VATSIM_CLIENT_ID);
+  target.searchParams.set("redirect_uri", env.VATSIM_REDIRECT_URI); target.searchParams.set("scope", "full_name vatsim_details");
+  target.searchParams.set("state", state);
+  return Response.redirect(target.toString(), 302);
+}
+
+async function finishVatsimLogin(request, env) {
+  if (!env.VATSIM_CLIENT_ID || !env.VATSIM_CLIENT_SECRET || !env.VATSIM_REDIRECT_URI)
+    return json({ Success: false, Error: "VATSIM OAuth is not configured." }, 503);
+  const url = new URL(request.url), state = url.searchParams.get("state") || "", code = url.searchParams.get("code") || "";
+  const stored = await env.DB.prepare("SELECT return_to FROM oauth_states WHERE state = ? AND expires_at > ?")
+    .bind(state, new Date().toISOString()).first();
+  if (!stored || !code) return json({ Success: false, Error: "Invalid or expired OAuth state." }, 400);
+  await env.DB.prepare("DELETE FROM oauth_states WHERE state = ?").bind(state).run();
+  const tokenBody = new URLSearchParams({ grant_type: "authorization_code", client_id: env.VATSIM_CLIENT_ID,
+    client_secret: env.VATSIM_CLIENT_SECRET, redirect_uri: env.VATSIM_REDIRECT_URI, code });
+  const tokenResponse = await fetch("https://auth.vatsim.net/oauth/token", { method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body: tokenBody });
+  if (!tokenResponse.ok) return json({ Success: false, Error: "VATSIM token exchange failed." }, 502);
+  const token = await tokenResponse.json();
+  const userResponse = await fetch("https://auth.vatsim.net/api/user", { headers: { Authorization: `Bearer ${token.access_token}`, Accept: "application/json" } });
+  if (!userResponse.ok) return json({ Success: false, Error: "VATSIM identity lookup failed." }, 502);
+  const user = (await userResponse.json()).data || {};
+  const cid = String(user.cid || "").trim(), name = String(user.personal?.name_full || "").trim().slice(0, 100);
+  if (!/^\d{4,12}$/.test(cid)) return json({ Success: false, Error: "VATSIM returned an invalid CID." }, 502);
+  const sessionToken = crypto.randomUUID() + crypto.randomUUID();
+  const now = new Date(), expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  await env.DB.prepare("INSERT INTO auth_sessions(token_hash, vatsim_cid, vatsim_name, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+    .bind(await sha256(sessionToken), cid, name, expires.toISOString(), now.toISOString()).run();
+  return new Response(null, { status: 302, headers: { Location: stored.return_to,
+    "Set-Cookie": `sua_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800` } });
+}
+
+async function logout(request, env) {
+  const token = cookieValue(request, "sua_session");
+  if (token) await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256(token)).run();
+  return new Response(null, { status: 302, headers: { Location: "/request",
+    "Set-Cookie": "sua_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" } });
+}
+
+async function requireSignedIn(request, env) {
+  if (!authEnabled(env)) return { allowed: true, session: null };
+  const session = await currentSession(request, env);
+  return session ? { allowed: true, session } : { allowed: false, response: json({ Success: false, Error: "VATSIM login required.", LoginRequired: true }, 401) };
+}
+
+async function requireController(request, env) {
+  if (!authEnabled(env)) return { allowed: true, session: null };
+  const session = await currentSession(request, env);
+  if (!session) return { allowed: false, response: json({ Success: false, Error: "VATSIM login required.", LoginRequired: true }, 401) };
+  if (!controllerCids(env).has(String(session.vatsim_cid)))
+    return { allowed: false, response: json({ Success: false, Error: "You do not have permission to manage airspace." }, 403) };
+  return { allowed: true, session };
+}
+
 async function pruneElapsedDesiredWindows(db, nowDate = new Date()) {
   const nowWire = wireDate(nowDate);
   const result = await db.prepare(
@@ -367,7 +469,7 @@ async function setCategory(request, env) {
   return json({ Success: true, Name: name, RaCategory: raCategory });
 }
 
-async function createActivationRequest(request, env) {
+async function createActivationRequest(request, env, session = null) {
   let body;
   try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
   const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [body?.AreaName];
@@ -394,10 +496,27 @@ async function createActivationRequest(request, env) {
   const now = new Date().toISOString();
   await env.DB.prepare(
     `INSERT INTO activation_requests
-       (id, area_name, area_names, requester, start_utc, end_utc, notes, ra_category, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
-  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, start.toISOString(), end.toISOString(), notes, raCategory, now).run();
-  return json({ Success: true, Id: id });
+       (id, area_name, area_names, requester, start_utc, end_utc, notes, ra_category, vatsim_cid, vatsim_name, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, start.toISOString(), end.toISOString(), notes, raCategory,
+    session?.vatsim_cid || null, session?.vatsim_name || null, now).run();
+  let discordNotified = false;
+  if (env.DISCORD_REQUEST_WEBHOOK_URL) {
+    const fields = [
+      { name: "Airspace", value: areaNames.join(", ").slice(0, 1024) || "-", inline: false },
+      { name: "Category", value: raCategory, inline: true },
+      { name: "Requester", value: requester + (session?.vatsim_cid ? ` (CID ${session.vatsim_cid})` : ""), inline: true },
+      { name: "Start", value: start.toISOString().replace(".000", ""), inline: true },
+      { name: "End", value: end.toISOString().replace(".000", ""), inline: true },
+    ];
+    if (notes) fields.push({ name: "Notes", value: notes.slice(0, 1024), inline: false });
+    try {
+      const webhookResponse = await fetch(env.DISCORD_REQUEST_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embeds: [{ title: "New SUA activation request", color: 3447003, fields, timestamp: now }] }) });
+      discordNotified = webhookResponse.ok;
+    } catch { /* A notification failure must not lose the stored request. */ }
+  }
+  return json({ Success: true, Id: id, DiscordNotified: discordNotified });
 }
 
 async function activationRequestsResponse(env) {
@@ -602,13 +721,25 @@ export async function onRequest(context) {
   const method = context.request.method.toUpperCase();
 
   try {
+    if (path === "/auth/session" && method === "GET") return authSessionResponse(context.request, context.env);
+    if (path === "/auth/login" && method === "GET") return beginVatsimLogin(context.request, context.env);
+    if (path === "/auth/callback" && method === "GET") return finishVatsimLogin(context.request, context.env);
+    if (path === "/auth/logout" && (method === "GET" || method === "POST")) return logout(context.request, context.env);
     if (path === "/sua/areas" && method === "GET") return areasResponse(context.env);
     if (path === "/sua/notams" && method === "GET") return notamsResponse(context.env);
-    if (path === "/sua/requests" && method === "GET") return activationRequestsResponse(context.env);
+    if (path === "/sua/requests" && method === "GET") {
+      const auth = await requireController(context.request, context.env); if (!auth.allowed) return auth.response;
+      return activationRequestsResponse(context.env);
+    }
     if (path === "/plugin/sync" && method === "POST") return pluginSync(context.request, context.env);
 
     if (method !== "POST") return json({ Error: "Not found." }, 404);
-    if (path === "/sua/requests") return createActivationRequest(context.request, context.env);
+    if (path === "/sua/requests") {
+      const auth = await requireSignedIn(context.request, context.env); if (!auth.allowed) return auth.response;
+      return createActivationRequest(context.request, context.env, auth.session);
+    }
+    const controllerAuth = await requireController(context.request, context.env);
+    if (!controllerAuth.allowed) return controllerAuth.response;
     if (path === "/sua/requests/update") return updateActivationRequest(context.request, context.env);
     if (path === "/sua/requests/review") return reviewActivationRequest(context.request, context.env);
     if (path === "/sua/activate") return activateArea(context.request, context.env);

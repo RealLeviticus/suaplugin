@@ -3,21 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SUA Airspace Map</title>
+<title>VATPAC Special Use Airspace Map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
 #map{position:absolute;inset:0;background:#0b1016;}
 .panel{position:absolute;z-index:1000;background:#829292;border:2px solid #5a6a6a;color:#000060;letter-spacing:1px;}
-.top{top:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;}
-.top h1{color:#000060;font-size:16px;margin-right:8px;}
+.top{top:10px;left:50%;transform:translateX(-50%);width:calc(100% - 20px);max-width:1280px;display:flex;flex-wrap:wrap;gap:7px;align-items:center;padding:8px 10px;}
+.top h1{color:#000060;font-size:15px;margin-right:5px;white-space:nowrap;}
 .top .clock{color:#000060;font-size:14px;}
 .top .spacer{margin-left:auto;}
-.top a,.top button{font-family:'Terminus',monospace;font-weight:bold;font-size:13px;border:2px solid #5a6a6a;background:#829292;color:#000060;padding:5px 9px;cursor:pointer;letter-spacing:1px;text-decoration:none;display:inline-block;}
-.top button.on{background:#000060;color:#c8ffc8;}
+.top a,.top button,.top select,.top input{font-family:'Terminus',monospace;font-weight:bold;font-size:12px;border:2px solid #5a6a6a;background:#aeb9b9;color:#000060;padding:5px 8px;cursor:pointer;letter-spacing:.7px;text-decoration:none;display:inline-block;height:31px;}
+.top input{width:190px;background:#c8d0d0;cursor:text;}.top select{max-width:145px;}
+.top button.on{background:#a9bbd0;border-color:#617d99;color:#001050;}
+.top a:hover,.top button:hover{background:#c3cccc;}
 .top button:active{background:#000060;color:#c8ffc8;}
-.legend{bottom:16px;left:10px;padding:8px 10px;font-size:12px;color:#101820;background:#8f9c9c;line-height:1.6;}
+.legend{bottom:16px;left:10px;padding:9px 11px;font-size:12px;color:#101820;background:#a5afaf;line-height:1.6;max-width:330px;}
 .legend .sw{display:inline-block;width:14px;height:10px;margin-right:6px;vertical-align:middle;border:1px solid #333;}
 .legend .counts{color:#000060;font-size:13px;margin-bottom:4px;}
 .legend .sub{color:#404a4a;font-size:11px;margin-top:4px;}
@@ -26,30 +28,36 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#829292;color:#101820;border-radius:0;}
 .leaflet-popup-content{font-family:'Terminus',monospace;font-weight:bold;font-size:13px;margin:8px 10px;letter-spacing:.5px;}
 .leaflet-popup-content .pn{color:#000060;font-size:14px;}
+.leaflet-popup-content .meta{padding:5px 0;margin:4px 0;border-top:1px solid #657575;border-bottom:1px solid #657575;line-height:1.45;}
 .leaflet-popup-content .st-act{color:#a00000;}
 .leaflet-popup-content .st-pre{color:#7a5a00;}
 .leaflet-popup-content .st-off{color:#404a4a;}
 .leaflet-popup-content .ra-tag{display:inline-block;padding:2px 6px;border:1px solid;margin-left:4px;color:#fff;}.leaflet-popup-content .ra1{background:#008040;border-color:#005828;}.leaflet-popup-content .ra2{background:#d0b000;border-color:#806800;color:#000;}.leaflet-popup-content .ra3{background:#c00000;border-color:#800000;}
 .leaflet-bar a{background:#829292;color:#000060;border-bottom-color:#5a6a6a;}
+@media(max-width:760px){.top{align-items:stretch}.top h1{width:100%}.top .spacer{display:none}.top input{flex:1;min-width:150px}.legend{right:10px;max-width:none}.top a,.top button,.top select,.top input{font-size:11px;}}
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div class="panel top">
-  <h1>SUA MAP</h1>
+  <h1>VATPAC SPECIAL USE AIRSPACE MAP</h1>
   <span class="clock" id="clock">----Z</span>
-  <span class="spacer"></span>
   <button id="fAll" class="on">ALL</button>
   <button id="fDanger">DANGER</button>
   <button id="fRestricted">RESTRICTED</button>
-  <button id="fActive">ACTIVE ONLY</button>
+  <button id="fMilitary">MILITARY</button>
+  <select id="statusFilter" aria-label="Status filter"><option value="ALL">ALL STATUS</option><option value="ACTIVE">ACTIVE</option><option value="SCHEDULED">SCHEDULED</option><option value="DEACTIVE">DEACTIVE</option></select>
+  <span class="spacer"></span>
+  <input id="areaSearch" list="areaNames" type="text" placeholder="FIND SUA..." autocomplete="off"><datalist id="areaNames"></datalist>
+  <button id="findArea">FIND</button>
+  <button id="fitShown">FIT SHOWN</button>
   <a href="/">&larr; LIST</a>
 </div>
 <div class="panel msg" id="msg"></div>
 <div class="panel legend" id="legend">
   <div class="counts" id="counts">LOADING&hellip;</div>
   <div><span class="sw" style="background:#ffd21a;border-color:#f2c200;"></span>DANGER</div>
-  <div><span class="sw" style="background:#ff3b30;border-color:#e02828;"></span>RESTRICTED / M</div>
+  <div><span class="sw" style="background:#ff3b30;border-color:#e02828;"></span>RESTRICTED / MILITARY</div>
   <div class="sub">FILLED = ACTIVE &middot; FAINT = PRE-ACT &middot; OUTLINE = DEACTIVE</div>
   <div class="sub">BORDER STYLE = ACTIVATION DRAW</div>
 </div>
@@ -63,8 +71,8 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
   }).addTo(map);
 
-  var filter = 'ALL';         // ALL | DANGER | RESTRICTED
-  var activeOnly = false;
+  var filter = 'ALL';         // ALL | DANGER | RESTRICTED | MILITARY
+  var statusFilter = 'ALL';
   var stateByName = {};       // name -> live area record from the API
   var layersByName = {};      // name -> Leaflet layer
   var geoLayer = null;
@@ -85,10 +93,10 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
     var t = (props.type || '').toUpperCase();
     if (filter === 'DANGER' && t !== 'DANGER') return false;
     if (filter === 'RESTRICTED' && t !== 'RESTRICTED') return false;
-    if (activeOnly){
-      var a = stateByName[props.name];
-      if (!a || (!a.Active && !a.PreActive)) return false;
-    }
+    var a = stateByName[props.name];
+    if (statusFilter === 'ACTIVE' && (!a || !a.Active)) return false;
+    if (statusFilter === 'SCHEDULED' && (!a || !a.Scheduled || a.Active)) return false;
+    if (statusFilter === 'DEACTIVE' && a && (a.Active || a.PreActive || a.Scheduled)) return false;
     return true;
   }
 
@@ -136,10 +144,10 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
     var a = stateByName[props.name] || {};
     var status = a.Active ? '<span class="st-act">ACTIVE</span>'
       : (a.PreActive ? '<span class="st-pre">PRE-ACTIVE</span>' : '<span class="st-off">DEACTIVE</span>');
-    var html = '<div class="pn">' + props.name + '</div>'
-      + (props.type || '').toUpperCase() + ' &middot; ' + lv(props.floor) + '&ndash;' + lv(props.ceiling) + '<br>'
+    var html = '<div class="pn">' + props.name + '</div><div class="meta">'
+      + 'TYPE: ' + (props.type || '').toUpperCase() + '<br>LEVELS: ' + lv(props.floor) + '&ndash;' + lv(props.ceiling) + '<br>'
       + 'STATUS: ' + status + (a.RaCategory ? ' <span class="ra-tag ' + a.RaCategory.toLowerCase() + '">' + a.RaCategory + '</span>' : '')
-      + '<br>DRAW: ' + (patternFor(props) || 'Solid').toUpperCase();
+      + '<br>DRAW: ' + (patternFor(props) || 'Solid').toUpperCase() + '</div>';
     if (a.Controller){
       var u = 'USER';
       if (a.ControllerCids && a.ControllerCids.length) u += ': ' + a.ControllerCids.join(', ');
@@ -176,6 +184,8 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
           layer.on('click', function(){ layer.setPopupContent(popupHtml(f.properties)); });
         }
       }).addTo(map);
+      var names = Object.keys(layersByName).sort();
+      document.getElementById('areaNames').innerHTML = names.map(function(name){ return '<option value="' + name.replace(/"/g,'&quot;') + '">'; }).join('');
       try { map.fitBounds(geoLayer.getBounds(), { padding:[20,20], maxZoom:6 }); } catch(e){}
     });
   }
@@ -192,17 +202,37 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
 
   function setFilter(f, id){
     filter = f;
-    ['fAll','fDanger','fRestricted'].forEach(function(x){ document.getElementById(x).className = ''; });
+    ['fAll','fDanger','fRestricted','fMilitary'].forEach(function(x){ document.getElementById(x).className = ''; });
     document.getElementById(id).className = 'on';
     applyStyles();
   }
   document.getElementById('fAll').onclick = function(){ setFilter('ALL','fAll'); };
   document.getElementById('fDanger').onclick = function(){ setFilter('DANGER','fDanger'); };
   document.getElementById('fRestricted').onclick = function(){ setFilter('RESTRICTED','fRestricted'); };
-  document.getElementById('fActive').onclick = function(){
-    activeOnly = !activeOnly;
-    this.className = activeOnly ? 'on' : '';
+  document.getElementById('fMilitary').onclick = function(){ setFilter('MILITARY','fMilitary'); };
+  document.getElementById('statusFilter').onchange = function(){
+    statusFilter = this.value;
     applyStyles();
+  };
+  function findArea(){
+    var query = document.getElementById('areaSearch').value.trim().toUpperCase();
+    if (!query) return;
+    var names = Object.keys(layersByName);
+    var name = names.find(function(value){ return value.toUpperCase() === query; }) || names.find(function(value){ return value.toUpperCase().indexOf(query) >= 0; });
+    if (!name){ setMsg('SUA NOT FOUND: ' + query); return; }
+    var layer = layersByName[name];
+    setMsg('');
+    map.fitBounds(layer.getBounds(), { padding:[70,70], maxZoom:9 });
+    layer.setPopupContent(popupHtml(layer.feature.properties));
+    layer.openPopup();
+    document.getElementById('areaSearch').value = name;
+  }
+  document.getElementById('findArea').onclick = findArea;
+  document.getElementById('areaSearch').onkeydown = function(event){ if (event.key === 'Enter') findArea(); };
+  document.getElementById('fitShown').onclick = function(){
+    var bounds = L.latLngBounds([]);
+    Object.keys(layersByName).forEach(function(name){ var layer = layersByName[name]; if (visible(layer.feature.properties)) bounds.extend(layer.getBounds()); });
+    if (bounds.isValid()) map.fitBounds(bounds, { padding:[35,35], maxZoom:7 });
   };
 
   setMsg('LOADING AIRSPACE…');

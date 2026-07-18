@@ -145,10 +145,6 @@ public sealed class CloudSyncService : IDisposable
             .Select(group => group.Last())
             .ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var item in incoming.Values)
-            _sua.UpdateDeactivationWindows(item.Name, item.DeactivationWindows);
-        _sua.RemoveMissingDeactivationWindows(incoming.Keys);
-
         foreach (var previous in _managedNames.Where(name => !incoming.ContainsKey(name)).ToList())
         {
             _sua.Deactivate(previous);
@@ -212,7 +208,6 @@ public sealed class CloudSyncService : IDisposable
         public string Name { get; set; } = "";
         public bool H24 { get; set; }
         public List<string>? Windows { get; set; }
-        public List<string>? DeactivationWindows { get; set; }
         public int? Floor { get; set; }
         public int? Ceiling { get; set; }
         public string? LinePattern { get; set; }

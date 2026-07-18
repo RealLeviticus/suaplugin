@@ -235,7 +235,7 @@ async function loadDesired(db, excludedControllerId = "") {
       continue;
     let item = byName.get(row.name);
     if (!item) {
-      item = { Name: row.name, H24: false, Windows: [], DeactivationWindows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [], _coverage: [] };
+      item = { Name: row.name, H24: false, Windows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [] };
       byName.set(row.name, item);
     }
     item.H24 = item.H24 || Boolean(row.h24);
@@ -245,10 +245,7 @@ async function loadDesired(db, excludedControllerId = "") {
     if (row.solar_mode && !item.SolarModes.includes(row.solar_mode)) item.SolarModes.push(row.solar_mode);
     for (const window of rowWindows) {
       if (!item.Windows.includes(window)) item.Windows.push(window);
-      if (row.source_type !== "controller" && !row.solar_mode && !item.DeactivationWindows.includes(window)) item.DeactivationWindows.push(window);
-      item._coverage.push({ Window: window });
     }
-    if (row.h24) item._coverage.push({ H24: true });
     if (row.floor !== null && row.floor !== undefined) item.Floor = Number(row.floor);
     if (row.ceiling !== null && row.ceiling !== undefined) item.Ceiling = Number(row.ceiling);
     // Rows are ordered by updated_at, so the most recent activating controller's
@@ -261,12 +258,6 @@ async function loadDesired(db, excludedControllerId = "") {
 
   for (const item of byName.values()) {
     item.Windows.sort();
-    item.DeactivationWindows = item.DeactivationWindows.filter(candidate => {
-      const end = candidate.slice(13);
-      return !item._coverage.some(coverage =>
-        coverage.H24 || (coverage.Window && coverage.Window !== candidate && coverage.Window.slice(0, 12) <= end && coverage.Window.slice(13) > end));
-    }).sort();
-    delete item._coverage;
     if (areaTypeFromName(item.Name, "") === "Danger") item.LinePattern = "Broken";
   }
   return Array.from(byName.values()).sort((a, b) => a.Name.localeCompare(b.Name));
@@ -540,6 +531,62 @@ async function setCategory(request, env) {
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
   await upsertManual(env.DB, name, { raCategory, linePattern: categoryLinePattern(raCategory, name) });
   return json({ Success: true, Name: name, RaCategory: raCategory });
+}
+
+async function copyAreaSettings(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
+  const source = String(body?.Source || "").trim();
+  const targets = [...new Set((Array.isArray(body?.Targets) ? body.Targets : []).map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!source || !targets.length) return json({ Success: false, Error: "Select at least one target SUA." }, 400);
+  const sourceRow = await env.DB.prepare("SELECT name, type FROM areas WHERE name = ?").bind(source).first();
+  if (!sourceRow) return json({ Success: false, Error: "The copy source is not in the SUA dataset." }, 400);
+  if (targets.includes(source)) return json({ Success: false, Error: "The source area cannot also be a copy target." }, 400);
+  if (targets.length > 100) return json({ Success: false, Error: "Select no more than 100 target areas at once." }, 400);
+
+  const floor = Number.parseInt(body?.Floor, 10);
+  const ceiling = Number.parseInt(body?.Ceiling, 10);
+  const category = String(body?.Category || "").trim().toUpperCase();
+  const timeMode = String(body?.TimeMode || "WINDOWS").trim().toUpperCase();
+  const windows = Array.isArray(body?.Windows) ? [...new Set(body.Windows.map((value) => String(value || "").trim()).filter(Boolean))].sort() : [];
+  if (!Number.isFinite(floor) || !Number.isFinite(ceiling) || ceiling < floor)
+    return json({ Success: false, Error: "Enter valid levels with the ceiling at or above the floor." }, 400);
+  if (!/^RA[123]$/.test(category)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
+  if (!["WINDOWS", "HJ", "HN"].includes(timeMode)) return json({ Success: false, Error: "Invalid activation time mode." }, 400);
+  for (const window of windows) {
+    if (!/^\d{12}-\d{12}$/.test(window) || window.slice(13) <= window.slice(0, 12))
+      return json({ Success: false, Error: `Invalid activation window: ${window}` }, 400);
+  }
+
+  const placeholders = targets.map(() => "?").join(",");
+  const rows = await env.DB.prepare(`SELECT name, type FROM areas WHERE name IN (${placeholders})`).bind(...targets).all();
+  const targetRows = rows.results || [];
+  const validNames = new Set(targetRows.map((row) => row.name));
+  const invalid = targets.filter((name) => !validNames.has(name));
+  if (invalid.length) return json({ Success: false, Error: `Unknown SUA: ${invalid.join(", ")}` }, 400);
+  const lockedRows = await env.DB.prepare(
+    `SELECT DISTINCT name FROM desired_activations WHERE source_type = 'controller' AND name IN (${placeholders})`
+  ).bind(...targets).all();
+  const locked = (lockedRows.results || []).map((row) => row.name);
+  if (locked.length) return json({ Success: false, Error: `Controller locked: ${locked.join(", ")}` }, 423);
+
+  let expiresAt = null;
+  if (timeMode === "WINDOWS" && windows.length) {
+    const lastEnd = windows[windows.length - 1].slice(13);
+    expiresAt = new Date(Date.UTC(Number(lastEnd.slice(0, 4)), Number(lastEnd.slice(4, 6)) - 1,
+      Number(lastEnd.slice(6, 8)), Number(lastEnd.slice(8, 10)), Number(lastEnd.slice(10, 12)))).toISOString();
+  }
+  for (const name of targets) {
+    const targetRow = targetRows.find((row) => row.name === name);
+    const isDanger = areaTypeFromName(targetRow.name, targetRow.type) === "Danger";
+    await upsertManual(env.DB, name, {
+      floor, ceiling, raCategory: isDanger ? null : category,
+      linePattern: isDanger ? null : categoryLinePattern(category, name),
+      h24: false, windows: timeMode === "WINDOWS" ? windows : [],
+      solarMode: timeMode === "WINDOWS" ? null : timeMode, expiresAt,
+    });
+  }
+  return json({ Success: true, Source: source, Applied: targets });
 }
 
 async function createActivationRequest(request, env, session = null) {
@@ -852,6 +899,7 @@ export async function onRequest(context) {
     if (path === "/sua/windows") return setWindows(context.request, context.env);
     if (path === "/sua/levels") return setLevels(context.request, context.env);
     if (path === "/sua/category") return setCategory(context.request, context.env);
+    if (path === "/sua/copy") return copyAreaSettings(context.request, context.env);
     if (path === "/sua/notams/activate") return activateNotam(context.request, context.env);
     if (path === "/sua/notams/deactivate") return deactivateNotam(context.request, context.env);
     return json({ Error: "Not found." }, 404);

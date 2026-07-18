@@ -33,7 +33,6 @@ public sealed class SuaAirspaceService : IDisposable
         public bool H24;
         public readonly List<Window> Windows = new();
         public RestrictedAreas.RestrictedArea.Activation? Injected;
-        public RestrictedAreas.RestrictedArea.Activation? PromotedToController;
         public bool? OriginalDaiw;
         public DisplayMaps.Map.Patterns? OriginalLinePattern;
         public DisplayMaps.Map.InfillTypes? OriginalInfillType;
@@ -73,7 +72,6 @@ public sealed class SuaAirspaceService : IDisposable
     private readonly object _lock = new object();
     private readonly Dictionary<string, ManualState> _states = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Timers.Timer _timer;
-    private readonly SuaExpiryNotification _expiryNotification = new();
     private List<CatalogueArea>? _catalogue;
     private Dictionary<string, CatalogueArea>? _catalogueByName;
     private readonly Dictionary<Control, bool> _activationPermissionControls = new();
@@ -84,8 +82,6 @@ public sealed class SuaAirspaceService : IDisposable
 
     public SuaAirspaceService()
     {
-        _expiryNotification.RetainAreaAsync = name =>
-            System.Threading.Tasks.Task.FromResult(TryRetainAsControllerActivation(name));
         _timer = new System.Timers.Timer(1000);
         _timer.Elapsed += (_, _) => Tick();
         _timer.AutoReset = true;
@@ -97,51 +93,6 @@ public sealed class SuaAirspaceService : IDisposable
         _disposed = true;
         _timer.Stop();
         _timer.Dispose();
-        _expiryNotification.Dispose();
-    }
-
-    internal Func<string, System.Threading.Tasks.Task<bool>>? RetainAreaAsync
-    {
-        get => _expiryNotification.RetainAreaAsync;
-        set => _expiryNotification.RetainAreaAsync = value;
-    }
-
-    internal void UpdateDeactivationWindows(string name, IEnumerable<string>? windows) =>
-        _expiryNotification.Update(name, windows);
-
-    internal void RemoveMissingDeactivationWindows(IEnumerable<string> names) =>
-        _expiryNotification.RemoveMissing(names);
-
-    private bool TryRetainAsControllerActivation(string name)
-    {
-        if (!CanActivateRestrictedAreas) return false;
-        var area = FindArea(name);
-        if (area is null) return false;
-
-        lock (_lock)
-        {
-            if (!_states.TryGetValue(area.Name, out var state) || state.Injected is null ||
-                !area.Activations.Any(activation => ReferenceEquals(activation, state.Injected)))
-                return false;
-
-            // Keep the injected H24 activation in vatSys, but relinquish plugin
-            // ownership so the standard controller-activation detector publishes
-            // it as USER: CID and the native Restricted Area window can edit it.
-            state.PromotedToController = state.Injected;
-            state.Injected = null;
-            if (state.OriginalInfillType.HasValue)
-                area.InfillType = state.OriginalInfillType.Value;
-            state.OriginalInfillType = null;
-            state.OriginalDaiw = null;
-            state.OriginalLinePattern = null;
-            state.OriginalFloor = null;
-            state.OriginalCeiling = null;
-            state.AppliedFloor = null;
-            state.AppliedCeiling = null;
-        }
-
-        RequestNativeMapRefresh();
-        return true;
     }
 
     internal bool AreasLoaded
@@ -448,18 +399,13 @@ public sealed class SuaAirspaceService : IDisposable
                             !area.Activations.Any(activation => ReferenceEquals(activation, state.Injected)))
                             state.Injected = null;
 
-                        if (state.PromotedToController is not null &&
-                            !area.Activations.Any(activation => ReferenceEquals(activation, state.PromotedToController)))
-                            state.PromotedToController = null;
-
                         var shouldBeActive = state.H24 ||
                             state.Windows.Any(w => now >= w.FromUtc && now < w.ToUtc);
 
-                        if (shouldBeActive && state.Injected is null && state.PromotedToController is null) { Inject(area, state); changed = true; }
+                        if (shouldBeActive && state.Injected is null) { Inject(area, state); changed = true; }
                         else if (!shouldBeActive && state.Injected is not null) { RemoveInjection(area, state); changed = true; }
 
                         state.Windows.RemoveAll(w => w.ToUtc <= now);
-                        if (!state.HasSchedule) state.PromotedToController = null;
                         if (CanDiscardState(state))
                             _states.Remove(entry.Key);
                     }
@@ -475,7 +421,6 @@ public sealed class SuaAirspaceService : IDisposable
             if (changed) Interlocked.Exchange(ref _nativeRefreshPending, 1);
             TryQueueNativeMapRefresh();
             TryQueueActivationPermissionUi();
-            _expiryNotification.Check(instance);
         }
         catch
         {
@@ -703,7 +648,7 @@ public sealed class SuaAirspaceService : IDisposable
     }
 
     private static bool CanDiscardState(ManualState state) =>
-        !state.HasSchedule && state.Injected is null && state.PromotedToController is null && !state.HasLevelEdits &&
+        !state.HasSchedule && state.Injected is null && !state.HasLevelEdits &&
         !state.OriginalDaiw.HasValue && !state.OriginalLinePattern.HasValue && !state.OriginalInfillType.HasValue;
 
     private bool ResetToDataset(RestrictedAreas instance)

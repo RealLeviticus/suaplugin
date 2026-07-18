@@ -475,6 +475,7 @@ async function createActivationRequest(request, env, session = null) {
   const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [body?.AreaName];
   const areaNames = Array.from(new Set(submittedAreas.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 50);
   const requester = String(body?.Requester || "").trim().slice(0, 80);
+  const contactEmail = String(body?.ContactEmail || "").trim().toLowerCase().slice(0, 254);
   const notes = String(body?.Notes || "").trim().slice(0, 500);
   const raCategory = String(body?.RaCategory || "").trim().toUpperCase();
   const start = new Date(String(body?.StartUtc || ""));
@@ -483,7 +484,9 @@ async function createActivationRequest(request, env, session = null) {
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
   }
-  if (!requester) return json({ Success: false, Error: "Your name or callsign is required." }, 400);
+  if (!requester) return json({ Success: false, Error: "Your name or CID is required." }, 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return json({ Success: false, Error: "A valid contact email is required." }, 400);
+  if (!notes) return json({ Success: false, Error: "Activation details are required. Explain why you need the airspace activated." }, 400);
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
     return json({ Success: false, Error: "Valid start and end times are required." }, 400);
@@ -496,9 +499,9 @@ async function createActivationRequest(request, env, session = null) {
   const now = new Date().toISOString();
   await env.DB.prepare(
     `INSERT INTO activation_requests
-       (id, area_name, area_names, requester, start_utc, end_utc, notes, ra_category, vatsim_cid, vatsim_name, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
-  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, start.toISOString(), end.toISOString(), notes, raCategory,
+       (id, area_name, area_names, requester, contact_email, start_utc, end_utc, notes, ra_category, vatsim_cid, vatsim_name, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, contactEmail, start.toISOString(), end.toISOString(), notes, raCategory,
     session?.vatsim_cid || null, session?.vatsim_name || null, now).run();
   let discordNotified = false;
   if (env.DISCORD_REQUEST_WEBHOOK_URL) {
@@ -518,10 +521,11 @@ async function createActivationRequest(request, env, session = null) {
       { name: "RA category", value: `**${raCategory}**\n${categoryStyle}`, inline: true },
       { name: "Duration", value: `**${duration}**`, inline: true },
       { name: "Requested by", value: requesterIdentity.slice(0, 1024), inline: false },
+      { name: "Contact email", value: contactEmail, inline: false },
       { name: "Starts", value: `<t:${startUnix}:F>\n<t:${startUnix}:R>`, inline: true },
       { name: "Ends", value: `<t:${endUnix}:F>\n<t:${endUnix}:R>`, inline: true },
     ];
-    if (notes) fields.push({ name: "Notes", value: notes.slice(0, 1024), inline: false });
+    fields.push({ name: "Activation details", value: notes.slice(0, 1024), inline: false });
     try {
       const webhookResponse = await fetch(env.DISCORD_REQUEST_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: "SUA Airspace Requests", allowed_mentions: { parse: [] }, embeds: [{
@@ -537,7 +541,7 @@ async function createActivationRequest(request, env, session = null) {
 
 async function activationRequestsResponse(env) {
   const result = await env.DB.prepare(
-    `SELECT id, area_name, area_names, requester, start_utc, end_utc, notes, ra_category, status, created_at, reviewed_at
+    `SELECT id, area_name, area_names, requester, contact_email, start_utc, end_utc, notes, ra_category, status, created_at, reviewed_at
        FROM activation_requests
       WHERE status = 'pending'
       ORDER BY start_utc, created_at`
@@ -545,7 +549,7 @@ async function activationRequestsResponse(env) {
   return json({ Success: true, Requests: (result.results || []).map((row) => ({
     Id: row.id, AreaName: row.area_name,
     AreaNames: (() => { const names = parseJson(row.area_names); return names.length ? names : [row.area_name]; })(),
-    Requester: row.requester, RaCategory: row.ra_category || "RA1",
+    Requester: row.requester, ContactEmail: row.contact_email, RaCategory: row.ra_category || "RA1",
     StartUtc: row.start_utc, EndUtc: row.end_utc, Notes: row.notes,
     Status: row.status, CreatedAt: row.created_at, ReviewedAt: row.reviewed_at,
   })) });
@@ -558,6 +562,7 @@ async function updateActivationRequest(request, env) {
   const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [];
   const areaNames = Array.from(new Set(submittedAreas.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 50);
   const requester = String(body?.Requester || "").trim().slice(0, 80);
+  const contactEmail = String(body?.ContactEmail || "").trim().toLowerCase().slice(0, 254);
   const notes = String(body?.Notes || "").trim().slice(0, 500);
   const raCategory = String(body?.RaCategory || "").trim().toUpperCase();
   const start = new Date(String(body?.StartUtc || ""));
@@ -567,7 +572,9 @@ async function updateActivationRequest(request, env) {
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
   }
-  if (!requester) return json({ Success: false, Error: "Requester is required." }, 400);
+  if (!requester) return json({ Success: false, Error: "Name or CID is required." }, 400);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return json({ Success: false, Error: "A valid contact email is required." }, 400);
+  if (!notes) return json({ Success: false, Error: "Activation details are required. Explain why the airspace should be activated." }, 400);
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
     return json({ Success: false, Error: "Valid start and end times are required." }, 400);
@@ -578,9 +585,9 @@ async function updateActivationRequest(request, env) {
 
   const result = await env.DB.prepare(
     `UPDATE activation_requests
-        SET area_name = ?, area_names = ?, requester = ?, start_utc = ?, end_utc = ?, notes = ?, ra_category = ?
+        SET area_name = ?, area_names = ?, requester = ?, contact_email = ?, start_utc = ?, end_utc = ?, notes = ?, ra_category = ?
       WHERE id = ? AND status = 'pending'`
-  ).bind(areaNames[0], JSON.stringify(areaNames), requester, start.toISOString(), end.toISOString(), notes, raCategory, id).run();
+  ).bind(areaNames[0], JSON.stringify(areaNames), requester, contactEmail, start.toISOString(), end.toISOString(), notes, raCategory, id).run();
   if (!result.meta?.changes) return json({ Success: false, Error: "This request is no longer pending." }, 409);
   return json({ Success: true, Id: id });
 }

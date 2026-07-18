@@ -368,8 +368,9 @@ button.danger-btn{border-color:#600000;color:#600000;}
       + ""<div><label>START (UTC)</label><input id='rqStart-"" + esc(q.Id) + ""' type='datetime-local' value='"" + esc(requestInputTime(q.StartUtc)) + ""'></div>""
       + ""<div><label>END (UTC)</label><input id='rqEnd-"" + esc(q.Id) + ""' type='datetime-local' value='"" + esc(requestInputTime(q.EndUtc)) + ""'></div>""
       + ""<div><label>RA CATEGORY</label><select id='rqCategory-"" + esc(q.Id) + ""'><option"" + (category === 'RA1' ? ' selected' : '') + "">RA1</option><option"" + (category === 'RA2' ? ' selected' : '') + "">RA2</option><option"" + (category === 'RA3' ? ' selected' : '') + "">RA3</option></select></div>""
-      + ""<div><label>REQUESTER</label><input id='rqRequester-"" + esc(q.Id) + ""' maxlength='80' value='"" + esc(q.Requester) + ""'></div>""
-      + ""<div class='full'><label>NOTES</label><textarea id='rqNotes-"" + esc(q.Id) + ""' maxlength='500'>"" + esc(q.Notes || '') + ""</textarea></div>""
+      + ""<div><label>NAME OR CID</label><input id='rqRequester-"" + esc(q.Id) + ""' maxlength='80' required value='"" + esc(q.Requester) + ""'></div>""
+      + ""<div><label>CONTACT EMAIL</label><input id='rqEmail-"" + esc(q.Id) + ""' type='email' maxlength='254' value='"" + esc(q.ContactEmail || '') + ""'></div>""
+      + ""<div class='full'><label>ACTIVATION DETAILS</label><textarea id='rqNotes-"" + esc(q.Id) + ""' maxlength='500' required>"" + esc(q.Notes || '') + ""</textarea></div>""
       + ""<div class='request-actions'><button onclick=\""saveRequestEdit('"" + esc(q.Id) + ""')\"">SAVE CHANGES</button><button onclick='cancelRequestEdit()'>CANCEL</button></div></div>"";
   }
 
@@ -384,7 +385,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
         var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
         var category = q.RaCategory || 'RA1';
         html += ""<div class='request-card'><div class='request-title'>"" + esc(requestedNames.join(', ')) + "" <span class='pill "" + category.toLowerCase() + ""'>"" + esc(category) + ""</span></div>""
-          + ""<div class='request-meta'>"" + esc(showRequestTime(q.StartUtc)) + "" &ndash; "" + esc(showRequestTime(q.EndUtc)) + "" &bull; REQUESTED BY "" + esc(q.Requester) + ""</div>""
+          + ""<div class='request-meta'>"" + esc(showRequestTime(q.StartUtc)) + "" &ndash; "" + esc(showRequestTime(q.EndUtc)) + "" &bull; REQUESTED BY "" + esc(q.Requester) + "" &bull; "" + esc(q.ContactEmail || '') + ""</div>""
           + (q.Notes ? ""<div class='request-notes'>"" + esc(q.Notes) + ""</div>"" : '')
           + ""<div class='request-actions'><button onclick=\""editRequest('"" + esc(q.Id) + ""')\"">EDIT</button><button onclick=\""reviewRequest('"" + esc(q.Id) + ""','accept')\"">ACCEPT</button><button class='danger-btn' onclick=\""reviewRequest('"" + esc(q.Id) + ""','decline')\"">DECLINE</button></div>""
           + (editingRequest === q.Id ? renderRequestEditor(q) : '') + ""</div>"";
@@ -405,6 +406,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
       EndUtc: document.getElementById('rqEnd-' + id).value + ':00Z',
       RaCategory: document.getElementById('rqCategory-' + id).value,
       Requester: document.getElementById('rqRequester-' + id).value,
+      ContactEmail: document.getElementById('rqEmail-' + id).value,
       Notes: document.getElementById('rqNotes-' + id).value
     };
     fetch('/api/sua/requests/update', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })

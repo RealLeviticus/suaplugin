@@ -10,7 +10,7 @@
 </head>
 <body>
 <div class='top'><h1>SUA AIRSPACE REQUEST</h1><span id='authStatus'></span><span id='clock'>----Z</span></div>
-<div class='intro'><h2>REQUEST AN ACTIVATION</h2><p>Select every restricted or danger area required, then nominate the activation period. This sends a request to the controlling team for review and does not activate airspace automatically.</p></div>
+<div class='intro'><h2>REQUEST AN ACTIVATION</h2><p>Select every restricted or danger area required, then nominate the activation period. This sends a request to the VATPAC AIS Team for review and does not activate airspace automatically.</p></div>
 <form class='form' id='form'>
   <div class='section-title'>AIRSPACE SELECTION</div>
   <div class='fields'><div class='full'>
@@ -27,8 +27,9 @@
   <div class='fields'>
     <div><label for='start'>START (YOUR LOCAL TIME)</label><input id='start' type='datetime-local' required><div class='utc' id='startUtc'></div></div>
     <div><label for='end'>END (YOUR LOCAL TIME)</label><input id='end' type='datetime-local' required><div class='utc' id='endUtc'></div></div>
-    <div class='full'><label for='requester'>YOUR NAME OR CALLSIGN</label><input id='requester' maxlength='80' required placeholder='WHO IS MAKING THIS REQUEST?'></div>
-    <div class='full'><label for='notes'>NOTES (OPTIONAL)</label><textarea id='notes' maxlength='500' placeholder='OPERATION DETAILS OR ANYTHING THE CONTROLLER SHOULD KNOW'></textarea></div>
+    <div><label for='requester'>YOUR NAME OR CID</label><input id='requester' maxlength='80' required placeholder='ENTER YOUR NAME OR VATSIM CID'></div>
+    <div><label for='contactEmail'>CONTACT EMAIL</label><input id='contactEmail' type='email' maxlength='254' required autocomplete='email' placeholder='YOU@EXAMPLE.COM'></div>
+    <div class='full'><label for='notes'>ACTIVATION DETAILS</label><textarea id='notes' maxlength='500' required placeholder='EXPLAIN WHY YOU NEED THIS AIRSPACE ACTIVATED AND PROVIDE RELEVANT OPERATION DETAILS'></textarea></div>
     <div class='full actions'><button id='submit' type='submit'>SEND ACTIVATION REQUEST</button><span class='msg' id='msg' role='status'></span></div>
   </div>
 </form>
@@ -48,7 +49,7 @@
   document.getElementById('selectShown').onclick=function(){var query=document.getElementById('search').value.trim().toUpperCase();areas.forEach(function(a){if(!query||a.Name.toUpperCase().indexOf(query)>=0)selected[a.Name]=true});renderAreas()};
   fetch('/api/sua/areas').then(function(r){return r.json()}).then(function(d){areas=d.Areas||[];document.getElementById('clock').textContent=d.UtcTime||'----Z';renderAreas()}).catch(function(){msg.textContent='THE AIRSPACE LIST IS TEMPORARILY UNAVAILABLE.'});
   fetch('/api/auth/session').then(function(r){return r.json()}).then(function(d){var el=document.getElementById('authStatus');if(!d.AuthEnabled){el.textContent='';return}if(d.Authenticated){el.innerHTML='VATSIM '+esc(d.Cid)+' &middot; <a href="/api/auth/logout">LOG OUT</a>'}else{el.innerHTML='<a href="/api/auth/login?return=%2Frequest">LOG IN WITH VATSIM</a>';button.disabled=true;msg.textContent='LOG IN WITH VATSIM TO SUBMIT A REQUEST.'}});
-  form.onsubmit=function(e){e.preventDefault();var names=selectedNames();if(!names.length){msg.textContent='SELECT AT LEAST ONE AIRSPACE AREA.';return}var category=document.querySelector("input[name='raCategory']:checked").value;button.disabled=true;msg.className='msg';msg.textContent='SENDING...';fetch('/api/sua/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({AreaNames:names,RaCategory:category,StartUtc:new Date(document.getElementById('start').value).toISOString(),EndUtc:new Date(document.getElementById('end').value).toISOString(),Requester:document.getElementById('requester').value,Notes:document.getElementById('notes').value})}).then(function(r){return r.json()}).then(function(d){if(d.LoginRequired){location.href='/api/auth/login?return=%2Frequest';return}if(!d.Success)throw new Error(d.Error||'REQUEST FAILED.');msg.className='msg ok';msg.textContent='REQUEST SENT FOR '+names.length+' AREA'+(names.length===1?'':'S')+' AS '+category+'.';selected={};renderAreas()}).catch(function(e){msg.textContent=(e.message||'REQUEST FAILED.').toUpperCase()}).finally(function(){button.disabled=false})};
+  form.onsubmit=function(e){e.preventDefault();var names=selectedNames();if(!names.length){msg.textContent='SELECT AT LEAST ONE AIRSPACE AREA.';return}var category=document.querySelector("input[name='raCategory']:checked").value;button.disabled=true;msg.className='msg';msg.textContent='SENDING...';fetch('/api/sua/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({AreaNames:names,RaCategory:category,StartUtc:new Date(document.getElementById('start').value).toISOString(),EndUtc:new Date(document.getElementById('end').value).toISOString(),Requester:document.getElementById('requester').value,ContactEmail:document.getElementById('contactEmail').value,Notes:document.getElementById('notes').value})}).then(function(r){return r.json()}).then(function(d){if(d.LoginRequired){location.href='/api/auth/login?return=%2Frequest';return}if(!d.Success)throw new Error(d.Error||'REQUEST FAILED.');msg.className='msg ok';msg.textContent='REQUEST SENT FOR '+names.length+' AREA'+(names.length===1?'':'S')+' AS '+category+'.';selected={};renderAreas()}).catch(function(e){msg.textContent=(e.message||'REQUEST FAILED.').toUpperCase()}).finally(function(){button.disabled=false})};
 })();
 </script>
 </body></html>

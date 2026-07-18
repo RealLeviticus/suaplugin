@@ -109,6 +109,7 @@ Recommended cutover order:
 docker compose exec postgres psql -U sua_airspace -d sua_airspace -c "SELECT name, applied_at FROM schema_migrations;"
 curl --fail https://sua.example.vatpac.org/healthz
 curl --fail https://sua.example.vatpac.org/api/sua/areas
+curl --fail https://sua.example.vatpac.org/api/sua/logs
 docker compose logs --tail=100 site
 ```
 

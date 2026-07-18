@@ -235,7 +235,8 @@ public sealed class SuaAirspaceService : IDisposable
         if (area is null) return false;
 
         DisplayMaps.Map.Patterns pattern;
-        if (string.Equals(fallbackPattern, "Broken", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(area.Type.ToString(), "Restricted", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(fallbackPattern, "Broken", StringComparison.OrdinalIgnoreCase))
         {
             pattern = DisplayMaps.Map.Patterns.Broken;
         }

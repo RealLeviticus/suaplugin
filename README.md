@@ -61,6 +61,7 @@ Public website endpoints:
 | Endpoint | Description |
 |---|---|
 | `GET /api/sua/areas` | Shared area catalogue and D1-backed desired state |
+| `GET /api/sua/logs` | Recent activation audit log with source and available VATSIM identity |
 | `POST /api/sua/activate?name=X&minutes=N` | Stage H24 or a duration |
 | `POST /api/sua/activate?name=X&mode=HJ|HN` | Stage recurring sunrise/sunset or sunset/sunrise activation |
 | `POST /api/sua/deactivate?name=X` | Clear every desired source for an area |

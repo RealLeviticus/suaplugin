@@ -59,7 +59,7 @@ function showWindow(wire) {
 }
 
 export function categoryLinePattern(category, areaName = "") {
-  if (areaTypeFromName(areaName, "") === "Danger") return "Broken";
+  if (areaTypeFromName(areaName, "") !== "Restricted") return "Broken";
   return category === "RA1" ? "Dashed" : (category === "RA2" ? "Dotted" : (category === "RA3" ? "Solid" : null));
 }
 
@@ -69,7 +69,7 @@ function requestedAreaCategories(body) {
   const byName = new Map();
   for (const item of submitted) {
     const name = String(item?.Name || "").trim();
-    const raCategory = areaTypeFromName(name, "") === "Danger" ? "" : String(item?.RaCategory || body?.RaCategory || "").trim().toUpperCase();
+    const raCategory = areaTypeFromName(name, "") === "Restricted" ? String(item?.RaCategory || body?.RaCategory || "").trim().toUpperCase() : "";
     if (name) byName.set(name, raCategory);
   }
   return Array.from(byName, ([Name, RaCategory]) => ({ Name, RaCategory })).slice(0, 50);
@@ -78,6 +78,44 @@ function requestedAreaCategories(body) {
 function areaTypeFromName(name, fallback) {
   const prefix = String(name || "").trim().charAt(0).toUpperCase();
   return prefix === "D" ? "Danger" : (prefix === "R" ? "Restricted" : (prefix === "M" ? "Military" : fallback));
+}
+
+async function recordActivation(db, { name, sourceType, actorCid = "", actorName = "", details = "", occurredAt = null, eventKey = null }) {
+  const now = new Date().toISOString();
+  await db.prepare(
+    `INSERT INTO activation_audit_log
+       (id, area_name, event_type, source_type, actor_cid, actor_name, details, occurred_at, created_at, event_key)
+     VALUES (?, ?, 'activated', ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(event_key) DO NOTHING`
+  ).bind(crypto.randomUUID(), name, sourceType, actorCid || null, actorName || null, details,
+    occurredAt || now, now, eventKey).run();
+}
+
+async function recordActivationWindows(db, names, windows, sourceType, actor = {}, sourceId = "") {
+  for (const name of names) for (const window of windows) {
+    if (!/^\d{12}-\d{12}$/.test(String(window))) continue;
+    const start = dateFromWire(String(window).slice(0, 12));
+    if (!Number.isFinite(start.getTime())) continue;
+    await recordActivation(db, {
+      name, sourceType, actorCid: actor.vatsim_cid || "", actorName: actor.vatsim_name || "",
+      details: `Scheduled window ${showWindow(window)}`, occurredAt: start.toISOString(),
+      eventKey: `${sourceType}|${sourceId}|${name}|${window}`,
+    });
+  }
+}
+
+async function activationLogsResponse(env) {
+  const result = await env.DB.prepare(
+    `SELECT id, area_name, event_type, source_type, actor_cid, actor_name, details, occurred_at
+       FROM activation_audit_log
+      WHERE occurred_at <= ?
+      ORDER BY occurred_at DESC
+      LIMIT 250`
+  ).bind(new Date().toISOString()).all();
+  return json({ Success: true, Logs: (result.results || []).map((row) => ({
+    Id: row.id, AreaName: row.area_name, EventType: row.event_type, SourceType: row.source_type,
+    ActorCid: row.actor_cid || "", ActorName: row.actor_name || "", Details: row.details || "", OccurredAt: row.occurred_at,
+  })) });
 }
 
 function requestedPath(context) {
@@ -252,13 +290,16 @@ async function loadDesired(db, excludedControllerId = "") {
     // draw style wins. Only controller sources carry one; web/NOTAM stay null.
     if (row.line_pattern !== null && row.line_pattern !== undefined && row.line_pattern !== "")
       item.LinePattern = String(row.line_pattern);
-    if (/^RA[123]$/.test(String(row.ra_category || ""))) item.RaCategory = String(row.ra_category);
+    if (areaTypeFromName(row.name, "") === "Restricted" && /^RA[123]$/.test(String(row.ra_category || ""))) item.RaCategory = String(row.ra_category);
     item.Sources.push({ Type: row.source_type, Id: row.source_id, Cid: row.controller_cid || "" });
   }
 
   for (const item of byName.values()) {
     item.Windows.sort();
-    if (areaTypeFromName(item.Name, "") === "Danger") item.LinePattern = "Broken";
+    if (areaTypeFromName(item.Name, "") !== "Restricted") {
+      item.LinePattern = "Broken";
+      item.RaCategory = null;
+    }
   }
   return Array.from(byName.values()).sort((a, b) => a.Name.localeCompare(b.Name));
 }
@@ -275,6 +316,11 @@ async function replaceControllerActivations(db, snapshot, catalogueNames) {
   const now = new Date();
   const nowText = now.toISOString();
   const expiresAt = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
+  const previousResult = await db.prepare(
+    "SELECT name FROM desired_activations WHERE source_type = 'controller' AND source_id = ?"
+  ).bind(installationId).all();
+  const previousNames = new Set((previousResult.results || []).map((row) => row.name));
+  const auditItems = [];
   const statements = [db.prepare(
     "DELETE FROM desired_activations WHERE source_type = 'controller' AND source_id = ?"
   ).bind(installationId)];
@@ -300,12 +346,13 @@ async function replaceControllerActivations(db, snapshot, catalogueNames) {
     const ceiling = Number.isFinite(ceilingValue) ? ceilingValue : null;
     if (!h24 && windows.length === 0 && floor === null && ceiling === null) continue;
     if (floor !== null && ceiling !== null && ceiling < floor) continue;
-    const linePattern = typeof item.LinePattern === "string" && item.LinePattern.trim()
+    const restricted = areaTypeFromName(name, "") === "Restricted";
+    const linePattern = !restricted ? "Broken" : (typeof item.LinePattern === "string" && item.LinePattern.trim()
       ? item.LinePattern.trim().slice(0, 32)
-      : null;
-    const raCategory = String(linePattern || "").toLowerCase() === "dashed" ? "RA1"
+      : null);
+    const raCategory = !restricted ? null : (String(linePattern || "").toLowerCase() === "dashed" ? "RA1"
       : (String(linePattern || "").toLowerCase() === "dotted" ? "RA2"
-        : (String(linePattern || "").toLowerCase() === "solid" ? "RA3" : null));
+        : (String(linePattern || "").toLowerCase() === "solid" ? "RA3" : null)));
 
     statements.push(db.prepare(
       `INSERT INTO desired_activations
@@ -317,9 +364,18 @@ async function replaceControllerActivations(db, snapshot, catalogueNames) {
          expires_at=excluded.expires_at, updated_at=excluded.updated_at`
     ).bind(name, installationId, controllerCid, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling,
       linePattern, raCategory, expiresAt, nowText, nowText));
+    auditItems.push({ name, h24, windows });
   }
 
   await runStatements(db, statements);
+  for (const item of auditItems) {
+    if (item.h24 && !previousNames.has(item.name)) await recordActivation(db, {
+      name: item.name, sourceType: "vatsys", actorCid: controllerCid,
+      details: "Activated manually through vatSys",
+    });
+    await recordActivationWindows(db, [item.name], item.windows, "vatsys_schedule",
+      { vatsim_cid: controllerCid }, installationId);
+  }
   return installationId;
 }
 
@@ -382,6 +438,8 @@ async function areasResponse(env) {
 
   const areas = (areasResult.results || []).map((row) => {
     const staged = desiredByName.get(row.name);
+    const areaType = areaTypeFromName(row.name, row.type);
+    const restricted = areaType === "Restricted";
     const stagedWindows = staged?.Windows || [];
     const timing = desiredTiming(staged);
     const manual = Boolean(staged?.Sources?.some((source) => source.Type === "manual"));
@@ -395,7 +453,7 @@ async function areasResponse(env) {
     const defaultPreActive = !Boolean(row.manual) && dflt.preActive;
     return {
       Name: row.name,
-      Type: areaTypeFromName(row.name, row.type),
+      Type: areaType,
       Floor: staged?.Floor ?? row.floor,
       Ceiling: staged?.Ceiling ?? row.ceiling,
       Daiw: Boolean(row.daiw),
@@ -413,8 +471,8 @@ async function areasResponse(env) {
       H24Manual: Boolean(staged?.H24),
       Scheduled: Boolean(stagedWindows.length),
       Windows: stagedWindows,
-      LinePattern: staged?.LinePattern ?? row.line_pattern ?? null,
-      RaCategory: staged?.RaCategory ?? row.ra_category ?? null,
+      LinePattern: restricted ? (staged?.LinePattern ?? row.line_pattern ?? null) : "Broken",
+      RaCategory: restricted ? (staged?.RaCategory ?? row.ra_category ?? null) : null,
       LevelsEdited: Boolean(staged && (staged.Floor !== null || staged.Ceiling !== null)),
       Staged: Boolean(staged),
       Saved: controller ? false : saved,
@@ -459,7 +517,7 @@ async function upsertManual(db, name, values) {
   ).bind(name, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling, linePattern, raCategory, solarMode, expiresAt, now, now).run();
 }
 
-async function activateArea(request, env) {
+async function activateArea(request, env, session = null) {
   const url = new URL(request.url);
   const name = (url.searchParams.get("name") || "").trim();
   if (!await requireArea(env.DB, name)) return json({ Success: false, Error: `Unknown area: ${name}` }, 400);
@@ -470,6 +528,8 @@ async function activateArea(request, env) {
       || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude)))
       return json({ Success: false, Error: "Solar timing is not available for this area yet." }, 409);
     await upsertManual(env.DB, name, { h24: false, windows: [], solarMode: mode, expiresAt: null });
+    const windows = solarWindows(mode, Number(location.latitude), Number(location.longitude), new Date());
+    await recordActivationWindows(env.DB, [name], windows, "schedule", session || {}, `web-${mode}`);
     return json({ Success: true, Name: name, Staged: true, Mode: mode });
   }
   const requested = Number.parseInt(url.searchParams.get("minutes") || "0", 10) || 0;
@@ -483,13 +543,17 @@ async function activateArea(request, env) {
       solarMode: null,
       expiresAt: to.toISOString(),
     });
+    await recordActivation(env.DB, { name, sourceType: "website", actorCid: session?.vatsim_cid || "",
+      actorName: session?.vatsim_name || "", details: `Activated for ${minutes} minutes` });
   } else {
     await upsertManual(env.DB, name, { h24: true, windows: [], solarMode: null, expiresAt: null });
+    await recordActivation(env.DB, { name, sourceType: "website", actorCid: session?.vatsim_cid || "",
+      actorName: session?.vatsim_name || "", details: "Activated until manually deactivated" });
   }
   return json({ Success: true, Name: name, Staged: true });
 }
 
-async function setWindows(request, env) {
+async function setWindows(request, env, session = null) {
   const url = new URL(request.url);
   const name = (url.searchParams.get("name") || "").trim();
   if (!await requireArea(env.DB, name)) return json({ Success: false, Error: `Unknown area: ${name}` }, 400);
@@ -505,6 +569,7 @@ async function setWindows(request, env) {
         Number(lastEnd.slice(6, 8)), Number(lastEnd.slice(8, 10)), Number(lastEnd.slice(10, 12)))).toISOString()
     : null;
   await upsertManual(env.DB, name, { h24: false, windows, solarMode: null, expiresAt });
+  await recordActivationWindows(env.DB, [name], windows, "schedule", session || {}, "web-windows");
   return json({ Success: true, Name: name, Staged: true });
 }
 
@@ -528,12 +593,13 @@ async function setCategory(request, env) {
   const name = (url.searchParams.get("name") || "").trim();
   const raCategory = (url.searchParams.get("category") || "").trim().toUpperCase();
   if (!await requireArea(env.DB, name)) return json({ Success: false, Error: `Unknown area: ${name}` }, 400);
+  if (areaTypeFromName(name, "") !== "Restricted") return json({ Success: false, Error: "RA categories apply only to restricted airspace." }, 400);
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
   await upsertManual(env.DB, name, { raCategory, linePattern: categoryLinePattern(raCategory, name) });
   return json({ Success: true, Name: name, RaCategory: raCategory });
 }
 
-async function copyAreaSettings(request, env) {
+async function copyAreaSettings(request, env, session = null) {
   let body;
   try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
   const source = String(body?.Source || "").trim();
@@ -559,7 +625,7 @@ async function copyAreaSettings(request, env) {
   }
 
   const placeholders = targets.map(() => "?").join(",");
-  const rows = await env.DB.prepare(`SELECT name, type FROM areas WHERE name IN (${placeholders})`).bind(...targets).all();
+  const rows = await env.DB.prepare(`SELECT name, type, latitude, longitude FROM areas WHERE name IN (${placeholders})`).bind(...targets).all();
   const targetRows = rows.results || [];
   const validNames = new Set(targetRows.map((row) => row.name));
   const invalid = targets.filter((name) => !validNames.has(name));
@@ -578,13 +644,16 @@ async function copyAreaSettings(request, env) {
   }
   for (const name of targets) {
     const targetRow = targetRows.find((row) => row.name === name);
-    const isDanger = areaTypeFromName(targetRow.name, targetRow.type) === "Danger";
+    const isDangerStyle = areaTypeFromName(targetRow.name, targetRow.type) !== "Restricted";
     await upsertManual(env.DB, name, {
-      floor, ceiling, raCategory: isDanger ? null : category,
-      linePattern: isDanger ? null : categoryLinePattern(category, name),
+      floor, ceiling, raCategory: isDangerStyle ? null : category,
+      linePattern: isDangerStyle ? "Broken" : categoryLinePattern(category, name),
       h24: false, windows: timeMode === "WINDOWS" ? windows : [],
       solarMode: timeMode === "WINDOWS" ? null : timeMode, expiresAt,
     });
+    const activationWindows = timeMode === "WINDOWS" ? windows : solarWindows(timeMode,
+      Number(targetRow.latitude), Number(targetRow.longitude), new Date());
+    await recordActivationWindows(env.DB, [name], activationWindows, "schedule", session || {}, `copy-${source}`);
   }
   return json({ Success: true, Source: source, Applied: targets });
 }
@@ -606,7 +675,7 @@ async function createActivationRequest(request, env, session = null) {
   if (!requester) return json({ Success: false, Error: "Your name or CID is required." }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return json({ Success: false, Error: "A valid contact email is required." }, 400);
   if (!notes) return json({ Success: false, Error: "Activation details are required. Explain why you need the airspace activated." }, 400);
-  if (areaCategories.some((item) => areaTypeFromName(item.Name, "") !== "Danger" && !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every restricted area." }, 400);
+  if (areaCategories.some((item) => areaTypeFromName(item.Name, "") === "Restricted" && !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every restricted area." }, 400);
   if (parsedSlots.error) return json({ Success: false, Error: parsedSlots.error }, 400);
   if (parsedSlots.windows.some((slot) => slot.end <= new Date())) return json({ Success: false, Error: "Every requested activation slot must end in the future." }, 400);
   const firstSlot = parsedSlots.windows[0], lastSlot = parsedSlots.windows[parsedSlots.windows.length - 1];
@@ -630,7 +699,7 @@ async function createActivationRequest(request, env, session = null) {
       ? `**${requester}**\n${session.vatsim_name ? `${session.vatsim_name} · ` : ""}VATSIM CID ${session.vatsim_cid}`
       : `**${requester}**`;
     const fields = [
-      { name: `Requested airspace (${areaNames.length})`, value: areaCategories.map((item) => `• **${item.Name}** · ${areaTypeFromName(item.Name, "") === "Danger" ? "Danger · Broken line" : item.RaCategory}`).join("\n").slice(0, 1024), inline: false },
+      { name: `Requested airspace (${areaNames.length})`, value: areaCategories.map((item) => `• **${item.Name}** · ${areaTypeFromName(item.Name, "") === "Restricted" ? item.RaCategory : "DNGR · Broken line"}`).join("\n").slice(0, 1024), inline: false },
       { name: "Activation slots", value: slotSummary, inline: false },
       { name: "Requested by", value: requesterIdentity.slice(0, 1024), inline: false },
       { name: "Contact email", value: contactEmail, inline: false },
@@ -681,7 +750,7 @@ async function updateActivationRequest(request, env) {
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
   }
-  if (areaCategories.some((item) => areaTypeFromName(item.Name, "") !== "Danger" && !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every restricted area." }, 400);
+  if (areaCategories.some((item) => areaTypeFromName(item.Name, "") === "Restricted" && !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every restricted area." }, 400);
   if (parsedSlots.error) return json({ Success: false, Error: parsedSlots.error }, 400);
   if (parsedSlots.windows.some((slot) => slot.end <= new Date())) return json({ Success: false, Error: "Every requested activation slot must end in the future." }, 400);
   const firstSlot = parsedSlots.windows[0], lastSlot = parsedSlots.windows[parsedSlots.windows.length - 1];
@@ -695,7 +764,7 @@ async function updateActivationRequest(request, env) {
   return json({ Success: true, Id: id });
 }
 
-async function reviewActivationRequest(request, env) {
+async function reviewActivationRequest(request, env, session = null) {
   let body;
   try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
   const id = String(body?.Id || "").trim();
@@ -726,12 +795,21 @@ async function reviewActivationRequest(request, env) {
          windows=excluded.windows, line_pattern=excluded.line_pattern, ra_category=excluded.ra_category,
          expires_at=excluded.expires_at, updated_at=excluded.updated_at`
     ).bind(item.Name, row.id, JSON.stringify(windows),
-      categoryLinePattern(item.RaCategory, item.Name), item.RaCategory || null, lastEnd.toISOString(), now, now));
+      categoryLinePattern(item.RaCategory, item.Name), areaTypeFromName(item.Name, "") === "Restricted" ? item.RaCategory : null, lastEnd.toISOString(), now, now));
   }
   statements.push(env.DB.prepare(
     "UPDATE activation_requests SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'"
   ).bind(decision === "accept" ? "accepted" : "declined", now, id));
   await env.DB.batch(statements);
+  if (decision === "accept") {
+    const storedWindows = parseJson(row.request_windows);
+    const windows = storedWindows.length ? storedWindows : [`${wireDate(new Date(row.start_utc))}-${wireDate(new Date(row.end_utc))}`];
+    const storedCategories = parseJson(row.area_categories);
+    const requestedAreas = parseJson(row.area_names);
+    const names = (storedCategories.length ? storedCategories.map((item) => item.Name) :
+      (requestedAreas.length ? requestedAreas : [row.area_name]));
+    await recordActivationWindows(env.DB, names, windows, "request_schedule", session || {}, row.id);
+  }
   return json({ Success: true, Id: id, Status: decision === "accept" ? "accepted" : "declined" });
 }
 
@@ -762,7 +840,7 @@ async function notamsResponse(env) {
   });
 }
 
-async function activateNotam(request, env) {
+async function activateNotam(request, env, session = null) {
   const url = new URL(request.url);
   const id = url.searchParams.get("id") || "";
   const mode = (url.searchParams.get("mode") || "now").toLowerCase();
@@ -784,6 +862,9 @@ async function activateNotam(request, env) {
       useSchedule ? row.end_utc : null, now, now));
   }
   await runStatements(env.DB, statements);
+  if (useSchedule) await recordActivationWindows(env.DB, matched, storedWindows, "notam_schedule", session || {}, `notam-${id}`);
+  else for (const name of matched) await recordActivation(env.DB, { name, sourceType: "notam",
+    actorCid: session?.vatsim_cid || "", actorName: session?.vatsim_name || "", details: `Activated from NOTAM ${id}` });
   return json({ Success: true, Id: Number(id), Mode: useSchedule ? "schedule" : "now", Activated: matched, Unmatched: parseJson(row.unmatched) });
 }
 
@@ -860,6 +941,10 @@ export async function onRequest(context) {
       const auth = await requireController(context.request, context.env); if (!auth.allowed) return auth.response;
       return activationRequestsResponse(context.env);
     }
+    if (path === "/sua/logs" && method === "GET") {
+      const auth = await requireController(context.request, context.env); if (!auth.allowed) return auth.response;
+      return activationLogsResponse(context.env);
+    }
     if (path === "/plugin/sync" && method === "POST") return pluginSync(context.request, context.env);
 
     if (method !== "POST") return json({ Error: "Not found." }, 404);
@@ -870,8 +955,8 @@ export async function onRequest(context) {
     const controllerAuth = await requireController(context.request, context.env);
     if (!controllerAuth.allowed) return controllerAuth.response;
     if (path === "/sua/requests/update") return updateActivationRequest(context.request, context.env);
-    if (path === "/sua/requests/review") return reviewActivationRequest(context.request, context.env);
-    if (path === "/sua/activate") return activateArea(context.request, context.env);
+    if (path === "/sua/requests/review") return reviewActivationRequest(context.request, context.env, controllerAuth.session);
+    if (path === "/sua/activate") return activateArea(context.request, context.env, controllerAuth.session);
     if (path === "/sua/deactivate") {
       const name = (new URL(context.request.url).searchParams.get("name") || "").trim();
       const lockedBy = await activeControllerCids(context.env.DB, name);
@@ -896,11 +981,11 @@ export async function onRequest(context) {
       ).bind(now).run();
       return json({ Success: true });
     }
-    if (path === "/sua/windows") return setWindows(context.request, context.env);
+    if (path === "/sua/windows") return setWindows(context.request, context.env, controllerAuth.session);
     if (path === "/sua/levels") return setLevels(context.request, context.env);
     if (path === "/sua/category") return setCategory(context.request, context.env);
-    if (path === "/sua/copy") return copyAreaSettings(context.request, context.env);
-    if (path === "/sua/notams/activate") return activateNotam(context.request, context.env);
+    if (path === "/sua/copy") return copyAreaSettings(context.request, context.env, controllerAuth.session);
+    if (path === "/sua/notams/activate") return activateNotam(context.request, context.env, controllerAuth.session);
     if (path === "/sua/notams/deactivate") return deactivateNotam(context.request, context.env);
     return json({ Error: "Not found." }, 404);
   } catch (error) {

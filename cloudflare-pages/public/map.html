@@ -33,6 +33,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
 .leaflet-popup-content .st-pre{color:#7a5a00;}
 .leaflet-popup-content .st-off{color:#404a4a;}
 .leaflet-popup-content .ra-tag{display:inline-block;padding:2px 6px;border:1px solid;margin-left:4px;color:#fff;}.leaflet-popup-content .ra1{background:#008040;border-color:#005828;}.leaflet-popup-content .ra2{background:#d0b000;border-color:#806800;color:#000;}.leaflet-popup-content .ra3{background:#c00000;border-color:#800000;}
+.leaflet-popup-content .dngr{background:#e6a45f;border-color:#a86628;color:#542800;}
 .leaflet-bar a{background:#829292;color:#000060;border-bottom-color:#5a6a6a;}
 @media(max-width:760px){.top{align-items:stretch}.top h1{width:100%}.top .spacer{display:none}.top input{flex:1;min-width:150px}.legend{right:10px;max-width:none}.top a,.top button,.top select,.top input{font-size:11px;}}
 </style>
@@ -57,7 +58,8 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
 <div class="panel legend" id="legend">
   <div class="counts" id="counts">LOADING&hellip;</div>
   <div><span class="sw" style="background:#ffd21a;border-color:#f2c200;"></span>DANGER</div>
-  <div><span class="sw" style="background:#ff3b30;border-color:#e02828;"></span>RESTRICTED / MILITARY</div>
+  <div><span class="sw" style="background:#ff3b30;border-color:#e02828;"></span>RESTRICTED</div>
+  <div><span class="sw" style="background:#ffd21a;border-color:#f2c200;"></span>MILITARY / DNGR</div>
   <div class="sub">FILLED = ACTIVE &middot; FAINT = PRE-ACT &middot; OUTLINE = DEACTIVE</div>
   <div class="sub">BORDER STYLE = ACTIVATION DRAW</div>
 </div>
@@ -121,9 +123,9 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
   function styleFor(props){
     if (!visible(props)) return { stroke:false, fill:false };
     var a = stateByName[props.name];
-    var isDanger = (props.type || '').toUpperCase() === 'DANGER';
-    var border = isDanger ? '#f2c200' : '#e02828';   // Danger yellow, Restricted/M red
-    var fillCol = isDanger ? '#ffd21a' : '#ff3b30';
+    var isDangerStyle = (props.type || '').toUpperCase() !== 'RESTRICTED';
+    var border = isDangerStyle ? '#f2c200' : '#e02828';
+    var fillCol = isDangerStyle ? '#ffd21a' : '#ff3b30';
     var d = dashFor(patternFor(props));
     var active = a && a.Active;
     var pre = a && a.PreActive;
@@ -146,7 +148,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
       : (a.PreActive ? '<span class="st-pre">PRE-ACTIVE</span>' : '<span class="st-off">DEACTIVE</span>');
     var html = '<div class="pn">' + props.name + '</div><div class="meta">'
       + 'TYPE: ' + (props.type || '').toUpperCase() + '<br>LEVELS: ' + lv(props.floor) + '&ndash;' + lv(props.ceiling) + '<br>'
-      + 'STATUS: ' + status + (a.RaCategory ? ' <span class="ra-tag ' + a.RaCategory.toLowerCase() + '">' + a.RaCategory + '</span>' : '')
+      + 'STATUS: ' + status + ((props.type || '').toUpperCase() !== 'RESTRICTED' ? ' <span class="ra-tag dngr">DNGR</span>' : (a.RaCategory ? ' <span class="ra-tag ' + a.RaCategory.toLowerCase() + '">' + a.RaCategory + '</span>' : ''))
       + '<br>DRAW: ' + (patternFor(props) || 'Solid').toUpperCase() + '</div>';
     if (a.Controller){
       var u = 'USER';

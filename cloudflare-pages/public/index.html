@@ -49,6 +49,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
 .pill.def{background:#b2baba;border-color:#747e7e;color:#303b3b;}
 .pill.user{background:#a4b8c7;border-color:#607c91;color:#183c58;}
 .pill.ra1{background:#9bc9ad;border-color:#5d9874;color:#064c24;}.pill.ra2{background:#dfcf8e;border-color:#9b853f;color:#493900;}.pill.ra3{background:#d9a0a0;border-color:#9a5d5d;color:#580000;}
+.pill.dngr{background:#e6a45f;border-color:#a86628;color:#542800;}
 .status-pills,.row-actions{display:flex;align-items:center;gap:6px;white-space:nowrap;}
 .status-pills{width:100%;}.status-pills .pill{flex:1;}
 .row:not(.head)>.cat .pill{width:100%;}
@@ -82,6 +83,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
 .request-panel.open{display:block;}.request-box{max-width:820px;margin:auto;background:#a0aaaa;border:3px solid #5a6a6a;box-shadow:8px 8px 0 rgba(0,0,0,.3)}
 .request-head{display:flex;align-items:center;gap:10px;padding:10px;background:#5a6a6a;color:#e0e8e8;letter-spacing:1px}.request-head span{margin-right:auto}
 .request-card{padding:12px;border-top:1px solid #5a6a6a;color:#101820}.request-card:first-child{border-top:0}.request-title{color:#000060;font-size:15px}.request-meta{margin-top:5px;font-size:12px;color:#344444}.request-notes{margin-top:7px;white-space:pre-wrap;font-weight:normal}.request-actions{display:flex;gap:7px;margin-top:9px}.request-actions button{width:110px}
+.log-row{display:grid;grid-template-columns:145px minmax(130px,1fr) 120px minmax(180px,1.5fr);gap:10px;padding:10px 12px;border-top:1px solid #5a6a6a;font-size:12px;color:#101820}.log-row:first-child{border-top:0}.log-time,.log-source{color:#404a4a}.log-area{color:#000060;font-size:13px}.log-actor{margin-top:3px;color:#344444}.log-empty{padding:18px;text-align:center;color:#404a4a}
 .request-edit{margin-top:10px;padding:10px;border:2px solid #5a6a6a;background:#96a4a4;display:grid;grid-template-columns:1fr 1fr;gap:9px}.request-edit .full{grid-column:1/-1}.request-edit label{display:block;color:#404a4a;font-size:11px;margin-bottom:3px}.request-edit input,.request-edit select{width:100%;background:#c8d0d0}.request-area-list{border:2px solid #5a6a6a;background:#a0aaaa;max-height:220px;overflow:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.request-edit .request-area-option{display:flex;align-items:center;gap:7px;padding:7px 9px;margin:0;border-right:1px solid #829292;border-bottom:1px solid #829292;color:#101820;cursor:pointer}.request-edit .request-area-option:hover{background:#b2bbbb}.request-edit .request-area-option input{width:auto;accent-color:#000060}.request-area-option .area-type{margin-left:auto;color:#404a4a}.request-edit .request-actions{grid-column:1/-1;margin-top:0}
 .request-slot{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:8px;border:1px solid #5a6a6a}.request-slot button{height:31px}
 .request-edit .request-area-option select{width:auto;margin-left:5px;padding:3px}
@@ -97,6 +99,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
   .row.head{grid-template-areas:'name type cat';}
   .row.head .st,.row.head .ac{display:none;}
   .request-edit{grid-template-columns:1fr}.request-edit .full{grid-column:auto}.request-area-list{grid-template-columns:1fr}.request-slot{grid-template-columns:1fr}
+  .log-row{grid-template-columns:1fr 1fr}.log-detail{grid-column:1/-1}
   .editor-grid{grid-template-columns:1fr}.editor-section.wide{grid-column:auto}.editor .win-row{grid-template-columns:1fr}.copy-targets{grid-template-columns:1fr 1fr}
 }
 @media (min-width:761px) and (max-width:1050px){
@@ -108,6 +111,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
 <div class='top'>
   <h1>VATPAC SPECIAL USE AIRSPACE MANAGER</h1>
   <button id='requestsBtn'>REQUESTS <span class='request-count' id='requestCount'>0</span></button>
+  <button id='logsBtn'>ACTIVATION LOG</button>
   <a class='maplink' href='/request'>REQUEST FORM</a>
   <a class='maplink' href='/map'>AIRSPACE MAP</a>
   <span class='clock' id='clock'>----Z</span>
@@ -145,10 +149,15 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
   <div class='request-head'><span>ACTIVATION REQUESTS</span><button id='closeRequests'>CLOSE</button></div>
   <div id='requestList'></div>
 </div></div>
+<div class='request-panel' id='logsPanel'><div class='request-box'>
+  <div class='request-head'><span>ACTIVATION LOG</span><button id='closeLogs'>CLOSE</button></div>
+  <div id='logsList'><div class='log-empty'>LOADING...</div></div>
+</div></div>
 <script>
 (function(){
   var areas = [];
   var requestItems = [];
+  var activationLogs = [];
   var editingRequest = null;
   var requestEditWindows = [];
   var filter = 'ALL';
@@ -170,6 +179,35 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
   }
 
   function setMsg(t){ document.getElementById('msg').textContent = t || ''; }
+
+  function logSource(source){
+    var labels = {website:'WEBSITE',schedule:'SCHEDULE',request_schedule:'REQUEST SCHEDULE',vatsys:'VATSYS',vatsys_schedule:'VATSYS SCHEDULE',notam:'NOTAM',notam_schedule:'NOTAM SCHEDULE'};
+    return labels[source] || String(source || 'UNKNOWN').toUpperCase();
+  }
+
+  function renderLogs(){
+    var html = '';
+    for (var i = 0; i < activationLogs.length; i++){
+      var item = activationLogs[i], when = new Date(item.OccurredAt);
+      var whenText = Number.isFinite(when.getTime()) ? when.toISOString().slice(0,16).replace('T',' ') + 'Z' : item.OccurredAt;
+      var actor = item.ActorName || '';
+      if (item.ActorCid) actor += (actor ? ' · ' : '') + 'CID ' + item.ActorCid;
+      if (!actor) actor = item.SourceType.indexOf('schedule') >= 0 ? 'AUTOMATED' : 'IDENTITY UNAVAILABLE';
+      html += "<div class='log-row'><span class='log-time'>" + esc(whenText) + "</span>"
+        + "<span><span class='log-area'>" + esc(item.AreaName) + "</span><div class='log-actor'>" + esc(actor) + "</div></span>"
+        + "<span class='log-source'>" + esc(logSource(item.SourceType)) + "</span>"
+        + "<span class='log-detail'>" + esc(item.Details || 'Activated') + "</span></div>";
+    }
+    document.getElementById('logsList').innerHTML = html || "<div class='log-empty'>NO ACTIVATIONS HAVE BEEN LOGGED YET.</div>";
+  }
+
+  function loadLogs(){
+    document.getElementById('logsList').innerHTML = "<div class='log-empty'>LOADING...</div>";
+    fetch('/api/sua/logs').then(function(r){ return r.json(); }).then(function(d){
+      if (!d.Success){ setMsg(d.Error || 'Unable to load activation log.'); return; }
+      activationLogs = d.Logs || []; renderLogs();
+    }).catch(function(e){ setMsg(e.message || 'Unable to load activation log.'); });
+  }
 
   // wire 'yyyyMMddHHmm' <-> input 'yyyy-MM-ddTHH:mm' (times are UTC)
   function wireToInput(w){
@@ -204,9 +242,12 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
         if (a.Default) status += "<span class='pill def'>DEFAULT</span>";
         // Manual is an internal source type, not a useful operator-facing state.
       }
-      var category = (a.Active || a.PreActive) && a.RaCategory
-        ? "<span class='pill " + a.RaCategory.toLowerCase() + "'>" + esc(a.RaCategory) + "</span>"
-        : '&mdash;';
+      var restricted = a.Type === 'Restricted' || a.Name.charAt(0).toUpperCase() === 'R';
+      var category = (a.Active || a.PreActive) && !restricted
+        ? "<span class='pill dngr'>DNGR</span>"
+        : ((a.Active || a.PreActive) && a.RaCategory
+          ? "<span class='pill " + a.RaCategory.toLowerCase() + "'>" + esc(a.RaCategory) + "</span>"
+          : '&mdash;');
       var sched = a.Schedule ? esc(a.Schedule) : '';
       if (a.Windows.length && !a.SolarMode){
         var wins = [];
@@ -247,7 +288,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
        + "<div class='field-grid'><label class='field'>FLOOR<input type='number' id='edFloor' step='100' value='" + draft.floor + "'></label>"
        + "<label class='field'>CEILING<input type='number' id='edCeiling' step='100' value='" + draft.ceiling + "'></label></div>"
        + "<div class='section-actions'><button onclick='saveLevels()'>SAVE LEVELS</button></div></section>";
-    h += "<section class='editor-section'><h3>RA CATEGORY</h3><div class='field-grid'><label class='field'>CATEGORY<select id='edCategory'><option" + (draft.category === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (draft.category === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (draft.category === 'RA3' ? ' selected' : '') + ">RA3</option></select></label></div><div class='section-actions'><button onclick='saveCategory()'>SAVE CATEGORY</button></div></section>";
+    if (a.Type === 'Restricted' || a.Name.charAt(0).toUpperCase() === 'R') h += "<section class='editor-section'><h3>RA CATEGORY</h3><div class='field-grid'><label class='field'>CATEGORY<select id='edCategory'><option" + (draft.category === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (draft.category === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (draft.category === 'RA3' ? ' selected' : '') + ">RA3</option></select></label></div><div class='section-actions'><button onclick='saveCategory()'>SAVE CATEGORY</button></div></section>";
     h += "<section class='editor-section wide'><h3>ACTIVE TIMES (UTC)</h3>";
     h += "<div class='field-grid'><label class='field'>MODE<select id='edTimeMode' onchange='timeModeChanged(this)'><option value='WINDOWS'" + (draft.timeMode === 'WINDOWS' ? ' selected' : '') + ">DATED UTC WINDOWS</option><option value='HJ'" + (draft.timeMode === 'HJ' ? ' selected' : '') + ">HJ · SUNRISE TO SUNSET</option><option value='HN'" + (draft.timeMode === 'HN' ? ' selected' : '') + ">HN · SUNSET TO SUNRISE</option></select></label></div>";
     if (draft.timeMode === 'WINDOWS'){
@@ -276,7 +317,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
       if (candidate.Name !== a.Name && !candidate.Default && !candidate.Controller) targets.push(candidate);
     }
     var h = "<section class='editor-section wide'><h3>COPY " + esc(a.Name) + " SETTINGS TO OTHER SUA</h3>"
-      + "<div class='copy-toolbar'><input type='text' id='copySearch' value='" + esc(copySearch) + "' placeholder='SEARCH SUA...' oninput='filterCopyTargets(this.value)'><button onclick='setCopyTargets(true)'>SELECT SHOWN</button><button onclick='setCopyTargets(false)'>CLEAR SELECTION</button><span class='hint'>Copies levels and activation times. RA category is also copied to Restricted and Military areas.</span></div><div class='copy-targets'>";
+      + "<div class='copy-toolbar'><input type='text' id='copySearch' value='" + esc(copySearch) + "' placeholder='SEARCH SUA...' oninput='filterCopyTargets(this.value)'><button onclick='setCopyTargets(true)'>SELECT SHOWN</button><button onclick='setCopyTargets(false)'>CLEAR SELECTION</button><span class='hint'>Copies levels and activation times. RA category is copied only to Restricted areas.</span></div><div class='copy-targets'>";
     if (!targets.length) h += "<div class='copy-empty'>No other editable SUA are available.</div>";
     for (var j = 0; j < targets.length; j++){
       var checked = copyTargets.indexOf(targets[j].Name) >= 0 ? ' checked' : '';
@@ -514,9 +555,9 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
     for (var c = 0; c < categoryItems.length; c++) selectedCategories[categoryItems[c].Name] = categoryItems[c].RaCategory;
     var checkboxes = '';
     for (var i = 0; i < areas.length; i++){
-      var dangerArea = areas[i].Type === 'Danger' || areas[i].Name.charAt(0).toUpperCase() === 'D';
+      var restrictedArea = areas[i].Type === 'Restricted' || areas[i].Name.charAt(0).toUpperCase() === 'R';
       var areaCategory = selectedCategories[areas[i].Name] || q.RaCategory || 'RA1';
-      checkboxes += "<label class='request-area-option'><input type='checkbox' value='" + esc(areas[i].Name) + "'" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + ">" + esc(areas[i].Name) + " <span class='area-type'>" + esc(areas[i].Type) + "</span>" + (dangerArea ? '' : "<select><option" + (areaCategory === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (areaCategory === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (areaCategory === 'RA3' ? ' selected' : '') + ">RA3</option></select>") + "</label>";
+      checkboxes += "<label class='request-area-option'><input type='checkbox' value='" + esc(areas[i].Name) + "'" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + ">" + esc(areas[i].Name) + " <span class='area-type'>" + esc(areas[i].Type) + "</span>" + (restrictedArea ? "<select><option" + (areaCategory === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (areaCategory === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (areaCategory === 'RA3' ? ' selected' : '') + ">RA3</option></select>" : "<span class='pill dngr'>DNGR</span>") + "</label>";
     }
     return "<div class='request-edit'>"
       + "<div class='full'><label>AIRSPACE</label><div class='request-area-list' id='rqAreas-" + esc(q.Id) + "'>" + checkboxes + "</div></div>"
@@ -535,7 +576,7 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
         var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
         var categoryItems = q.AreaCategories && q.AreaCategories.length ? q.AreaCategories : requestedNames.map(function(name){ return {Name:name,RaCategory:q.RaCategory || 'RA1'}; });
         var title = '';
-        for (var c = 0; c < categoryItems.length; c++){ var requestCategory = categoryItems[c].RaCategory || 'DANGER'; title += (c ? ', ' : '') + esc(categoryItems[c].Name) + " <span class='pill " + esc(requestCategory.toLowerCase()) + "'>" + esc(requestCategory) + "</span>"; }
+        for (var c = 0; c < categoryItems.length; c++){ var requestCategory = categoryItems[c].Name.charAt(0).toUpperCase() === 'R' ? (categoryItems[c].RaCategory || 'RA1') : 'DNGR'; title += (c ? ', ' : '') + esc(categoryItems[c].Name) + " <span class='pill " + esc(requestCategory.toLowerCase()) + "'>" + esc(requestCategory) + "</span>"; }
         var requestWindows = q.Windows && q.Windows.length ? q.Windows : [];
         var slotSummary = '';
         for (var w = 0; w < requestWindows.length; w++) slotSummary += "<div>SLOT " + (w + 1) + ' · ' + requestWindowLabel(requestWindows[w]) + "</div>";
@@ -628,6 +669,9 @@ button.danger-btn{background:#d9aaaa;border-color:#9a6262;color:#650000;}
   document.getElementById('requestsBtn').onclick = function(){ document.getElementById('requestPanel').className = 'request-panel open'; loadRequests(); };
   document.getElementById('closeRequests').onclick = function(){ document.getElementById('requestPanel').className = 'request-panel'; };
   document.getElementById('requestPanel').onclick = function(e){ if (e.target === this) this.className = 'request-panel'; };
+  document.getElementById('logsBtn').onclick = function(){ document.getElementById('logsPanel').className = 'request-panel open'; loadLogs(); };
+  document.getElementById('closeLogs').onclick = function(){ document.getElementById('logsPanel').className = 'request-panel'; };
+  document.getElementById('logsPanel').onclick = function(e){ if (e.target === this) this.className = 'request-panel'; };
 
   function startControlPage(){
     refresh(true);

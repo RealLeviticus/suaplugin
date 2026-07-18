@@ -26,8 +26,10 @@ test("legacy single-window requests remain supported", () => {
   assert.equal(result.windows[0].wire, "203007030500-203007030600");
 });
 
-test("danger areas use a broken active border regardless of RA category", () => {
+test("danger and military areas use a broken active border regardless of RA category", () => {
   assert.equal(categoryLinePattern("RA1", "D193 PEARCE"), "Broken");
   assert.equal(categoryLinePattern("RA3", "D193 PEARCE"), "Broken");
+  assert.equal(categoryLinePattern("RA1", "M CTA AMX"), "Broken");
+  assert.equal(categoryLinePattern("RA3", "M CTA AMX"), "Broken");
   assert.equal(categoryLinePattern("RA2", "R166A"), "Dotted");
 });

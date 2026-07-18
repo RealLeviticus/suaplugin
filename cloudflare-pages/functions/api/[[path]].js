@@ -69,7 +69,7 @@ function requestedAreaCategories(body) {
   const byName = new Map();
   for (const item of submitted) {
     const name = String(item?.Name || "").trim();
-    const raCategory = String(item?.RaCategory || body?.RaCategory || "").trim().toUpperCase();
+    const raCategory = areaTypeFromName(name, "") === "Danger" ? "" : String(item?.RaCategory || body?.RaCategory || "").trim().toUpperCase();
     if (name) byName.set(name, raCategory);
   }
   return Array.from(byName, ([Name, RaCategory]) => ({ Name, RaCategory })).slice(0, 50);
@@ -235,7 +235,7 @@ async function loadDesired(db, excludedControllerId = "") {
       continue;
     let item = byName.get(row.name);
     if (!item) {
-      item = { Name: row.name, H24: false, Windows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [] };
+      item = { Name: row.name, H24: false, Windows: [], NotamWindows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [], _coverage: [] };
       byName.set(row.name, item);
     }
     item.H24 = item.H24 || Boolean(row.h24);
@@ -245,7 +245,10 @@ async function loadDesired(db, excludedControllerId = "") {
     if (row.solar_mode && !item.SolarModes.includes(row.solar_mode)) item.SolarModes.push(row.solar_mode);
     for (const window of rowWindows) {
       if (!item.Windows.includes(window)) item.Windows.push(window);
+      if (row.source_type === "notam" && !item.NotamWindows.includes(window)) item.NotamWindows.push(window);
+      item._coverage.push({ Window: window, Notam: row.source_type === "notam" });
     }
+    if (row.h24) item._coverage.push({ H24: true, Notam: row.source_type === "notam" });
     if (row.floor !== null && row.floor !== undefined) item.Floor = Number(row.floor);
     if (row.ceiling !== null && row.ceiling !== undefined) item.Ceiling = Number(row.ceiling);
     // Rows are ordered by updated_at, so the most recent activating controller's
@@ -258,6 +261,12 @@ async function loadDesired(db, excludedControllerId = "") {
 
   for (const item of byName.values()) {
     item.Windows.sort();
+    item.NotamWindows = item.NotamWindows.filter(candidate => {
+      const end = candidate.slice(13);
+      return !item._coverage.some(coverage =>
+        coverage.H24 || (coverage.Window && coverage.Window !== candidate && coverage.Window.slice(0, 12) <= end && coverage.Window.slice(13) > end));
+    }).sort();
+    delete item._coverage;
     if (areaTypeFromName(item.Name, "") === "Danger") item.LinePattern = "Broken";
   }
   return Array.from(byName.values()).sort((a, b) => a.Name.localeCompare(b.Name));
@@ -550,7 +559,7 @@ async function createActivationRequest(request, env, session = null) {
   if (!requester) return json({ Success: false, Error: "Your name or CID is required." }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return json({ Success: false, Error: "A valid contact email is required." }, 400);
   if (!notes) return json({ Success: false, Error: "Activation details are required. Explain why you need the airspace activated." }, 400);
-  if (areaCategories.some((item) => !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every area." }, 400);
+  if (areaCategories.some((item) => areaTypeFromName(item.Name, "") !== "Danger" && !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every restricted area." }, 400);
   if (parsedSlots.error) return json({ Success: false, Error: parsedSlots.error }, 400);
   if (parsedSlots.windows.some((slot) => slot.end <= new Date())) return json({ Success: false, Error: "Every requested activation slot must end in the future." }, 400);
   const firstSlot = parsedSlots.windows[0], lastSlot = parsedSlots.windows[parsedSlots.windows.length - 1];
@@ -574,7 +583,7 @@ async function createActivationRequest(request, env, session = null) {
       ? `**${requester}**\n${session.vatsim_name ? `${session.vatsim_name} · ` : ""}VATSIM CID ${session.vatsim_cid}`
       : `**${requester}**`;
     const fields = [
-      { name: `Requested airspace (${areaNames.length})`, value: areaCategories.map((item) => `• **${item.Name}** · ${item.RaCategory}${areaTypeFromName(item.Name, "") === "Danger" ? " · Broken line" : ""}`).join("\n").slice(0, 1024), inline: false },
+      { name: `Requested airspace (${areaNames.length})`, value: areaCategories.map((item) => `• **${item.Name}** · ${areaTypeFromName(item.Name, "") === "Danger" ? "Danger · Broken line" : item.RaCategory}`).join("\n").slice(0, 1024), inline: false },
       { name: "Activation slots", value: slotSummary, inline: false },
       { name: "Requested by", value: requesterIdentity.slice(0, 1024), inline: false },
       { name: "Contact email", value: contactEmail, inline: false },
@@ -625,7 +634,7 @@ async function updateActivationRequest(request, env) {
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
   }
-  if (areaCategories.some((item) => !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every area." }, 400);
+  if (areaCategories.some((item) => areaTypeFromName(item.Name, "") !== "Danger" && !/^RA[123]$/.test(item.RaCategory))) return json({ Success: false, Error: "Select RA1, RA2, or RA3 for every restricted area." }, 400);
   if (parsedSlots.error) return json({ Success: false, Error: parsedSlots.error }, 400);
   if (parsedSlots.windows.some((slot) => slot.end <= new Date())) return json({ Success: false, Error: "Every requested activation slot must end in the future." }, 400);
   const firstSlot = parsedSlots.windows[0], lastSlot = parsedSlots.windows[parsedSlots.windows.length - 1];
@@ -670,7 +679,7 @@ async function reviewActivationRequest(request, env) {
          windows=excluded.windows, line_pattern=excluded.line_pattern, ra_category=excluded.ra_category,
          expires_at=excluded.expires_at, updated_at=excluded.updated_at`
     ).bind(item.Name, row.id, JSON.stringify(windows),
-      categoryLinePattern(item.RaCategory || "RA1", item.Name), item.RaCategory || "RA1", lastEnd.toISOString(), now, now));
+      categoryLinePattern(item.RaCategory, item.Name), item.RaCategory || null, lastEnd.toISOString(), now, now));
   }
   statements.push(env.DB.prepare(
     "UPDATE activation_requests SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'"

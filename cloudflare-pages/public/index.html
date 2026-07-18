@@ -39,7 +39,6 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .pill{display:inline-block;padding:3px 8px;font-size:12px;letter-spacing:1px;border:1px solid #5a6a6a;background:#a0aaaa;color:#404a4a;}
 .pill.act{background:#c00000;border-color:#800000;color:#ffffff;}
 .pill.pre{background:#c8a000;border-color:#806000;color:#000000;}
-.pill.man{background:#000060;border-color:#000040;color:#c8ffc8;}
 .pill.sched{background:#005050;border-color:#003030;color:#c8ffff;}
 .pill.stage{background:#304878;border-color:#182848;color:#ffffff;}
 .pill.def{background:#707878;border-color:#404848;color:#ffffff;}
@@ -163,8 +162,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
         status += "<span class='pill user'>" + esc(userLabel) + "</span>";
       } else {
         if (a.Default) status += "<span class='pill def'>DEFAULT</span>";
-        // A DEFAULT (dataset-locked) area never shows shared-source MAN/SAVED tags.
-        if (a.Manual && !a.Default) status += "<span class='pill man'>MAN</span>";
+        // Manual is an internal source type, not a useful operator-facing state.
         if (a.Scheduled && !a.Manual) status += "<span class='pill sched'>SCHED</span>";
         if (a.Saved && !a.Default) status += "<span class='pill stage'>SAVED</span>";
       }
@@ -408,8 +406,9 @@ button.danger-btn{border-color:#600000;color:#600000;}
     for (var c = 0; c < categoryItems.length; c++) selectedCategories[categoryItems[c].Name] = categoryItems[c].RaCategory;
     var checkboxes = '';
     for (var i = 0; i < areas.length; i++){
+      var dangerArea = areas[i].Type === 'Danger' || areas[i].Name.charAt(0).toUpperCase() === 'D';
       var areaCategory = selectedCategories[areas[i].Name] || q.RaCategory || 'RA1';
-      checkboxes += "<label class='request-area-option'><input type='checkbox' value='" + esc(areas[i].Name) + "'" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + ">" + esc(areas[i].Name) + " <span class='area-type'>" + esc(areas[i].Type) + "</span><select><option" + (areaCategory === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (areaCategory === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (areaCategory === 'RA3' ? ' selected' : '') + ">RA3</option></select></label>";
+      checkboxes += "<label class='request-area-option'><input type='checkbox' value='" + esc(areas[i].Name) + "'" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + ">" + esc(areas[i].Name) + " <span class='area-type'>" + esc(areas[i].Type) + "</span>" + (dangerArea ? '' : "<select><option" + (areaCategory === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (areaCategory === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (areaCategory === 'RA3' ? ' selected' : '') + ">RA3</option></select>") + "</label>";
     }
     return "<div class='request-edit'>"
       + "<div class='full'><label>AIRSPACE</label><div class='request-area-list' id='rqAreas-" + esc(q.Id) + "'>" + checkboxes + "</div></div>"
@@ -428,7 +427,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
         var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
         var categoryItems = q.AreaCategories && q.AreaCategories.length ? q.AreaCategories : requestedNames.map(function(name){ return {Name:name,RaCategory:q.RaCategory || 'RA1'}; });
         var title = '';
-        for (var c = 0; c < categoryItems.length; c++) title += (c ? ', ' : '') + esc(categoryItems[c].Name) + " <span class='pill " + esc(categoryItems[c].RaCategory.toLowerCase()) + "'>" + esc(categoryItems[c].RaCategory) + "</span>";
+        for (var c = 0; c < categoryItems.length; c++){ var requestCategory = categoryItems[c].RaCategory || 'DANGER'; title += (c ? ', ' : '') + esc(categoryItems[c].Name) + " <span class='pill " + esc(requestCategory.toLowerCase()) + "'>" + esc(requestCategory) + "</span>"; }
         var requestWindows = q.Windows && q.Windows.length ? q.Windows : [];
         var slotSummary = '';
         for (var w = 0; w < requestWindows.length; w++) slotSummary += "<div>SLOT " + (w + 1) + ' · ' + requestWindowLabel(requestWindows[w]) + "</div>";
@@ -470,7 +469,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
     var areaInputs = document.getElementById('rqAreas-' + id).getElementsByTagName('input');
     var names = [];
     var areaCategories = [];
-    for (var i = 0; i < areaInputs.length; i++) if (areaInputs[i].checked){ names.push(areaInputs[i].value); areaCategories.push({Name:areaInputs[i].value, RaCategory:areaInputs[i].parentNode.querySelector('select').value}); }
+    for (var i = 0; i < areaInputs.length; i++) if (areaInputs[i].checked){ var categorySelect = areaInputs[i].parentNode.querySelector('select'); names.push(areaInputs[i].value); areaCategories.push({Name:areaInputs[i].value, RaCategory:categorySelect ? categorySelect.value : null}); }
     var payload = {
       Id: id, AreaCategories: areaCategories,
       Windows: requestEditWindows.map(function(w){ return {StartUtc:w.Start + ':00Z', EndUtc:w.End + ':00Z'}; })

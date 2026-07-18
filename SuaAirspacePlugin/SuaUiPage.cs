@@ -15,6 +15,8 @@ html,body{min-height:100%;background:#a0aaaa;font-family:'Terminus',monospace;fo
 .top{position:sticky;top:0;background:#829292;border-bottom:2px solid #5a6a6a;padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;z-index:5;}
 .top h1{color:#000060;font-size:18px;letter-spacing:1px;margin-right:auto;}
 .top .clock{color:#000060;font-size:14px;}
+.top a.maplink{font-family:'Terminus',monospace;font-weight:bold;font-size:13px;border:2px solid #5a6a6a;background:#829292;color:#000060;padding:5px 10px;text-decoration:none;letter-spacing:1px;}
+.top a.maplink:active{background:#000060;color:#c8ffc8;}
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;}
 button,select,input{font-family:'Terminus',monospace;font-weight:bold;font-size:13px;border:2px solid #5a6a6a;background:#829292;color:#000060;padding:6px 10px;cursor:pointer;letter-spacing:1px;}
 input[type=text],input[type=number],input[type=datetime-local]{background:#c8d0d0;cursor:text;}
@@ -72,6 +74,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 <body>
 <div class='top'>
   <h1>SUA AIRSPACE</h1>
+  <a class='maplink' href='/map'>AIRSPACE MAP</a>
   <span class='clock' id='clock'>----Z</span>
 </div>
 <div class='controls'>

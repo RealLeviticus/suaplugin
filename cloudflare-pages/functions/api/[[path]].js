@@ -67,7 +67,7 @@ async function loadDesired(db, excludedControllerId = "") {
   await pruneElapsedDesiredWindows(db, nowDate);
   const now = nowDate.toISOString();
   const result = await db.prepare(
-    `SELECT name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, expires_at, updated_at
+    `SELECT name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, line_pattern, expires_at, updated_at
        FROM desired_activations
       WHERE expires_at IS NULL OR expires_at > ?
       ORDER BY updated_at`
@@ -79,7 +79,7 @@ async function loadDesired(db, excludedControllerId = "") {
       continue;
     let item = byName.get(row.name);
     if (!item) {
-      item = { Name: row.name, H24: false, Windows: [], Floor: null, Ceiling: null, Sources: [] };
+      item = { Name: row.name, H24: false, Windows: [], Floor: null, Ceiling: null, LinePattern: null, Sources: [] };
       byName.set(row.name, item);
     }
     item.H24 = item.H24 || Boolean(row.h24);
@@ -88,6 +88,10 @@ async function loadDesired(db, excludedControllerId = "") {
     }
     if (row.floor !== null && row.floor !== undefined) item.Floor = Number(row.floor);
     if (row.ceiling !== null && row.ceiling !== undefined) item.Ceiling = Number(row.ceiling);
+    // Rows are ordered by updated_at, so the most recent activating controller's
+    // draw style wins. Only controller sources carry one; web/NOTAM stay null.
+    if (row.line_pattern !== null && row.line_pattern !== undefined && row.line_pattern !== "")
+      item.LinePattern = String(row.line_pattern);
     item.Sources.push({ Type: row.source_type, Id: row.source_id, Cid: row.controller_cid || "" });
   }
 
@@ -132,16 +136,19 @@ async function replaceControllerActivations(db, snapshot, catalogueNames) {
     const ceiling = Number.isFinite(ceilingValue) ? ceilingValue : null;
     if (!h24 && windows.length === 0 && floor === null && ceiling === null) continue;
     if (floor !== null && ceiling !== null && ceiling < floor) continue;
+    const linePattern = typeof item.LinePattern === "string" && item.LinePattern.trim()
+      ? item.LinePattern.trim().slice(0, 32)
+      : null;
 
     statements.push(db.prepare(
       `INSERT INTO desired_activations
-         (name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, expires_at, created_at, updated_at)
-       VALUES (?, 'controller', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (name, source_type, source_id, controller_cid, h24, windows, floor, ceiling, line_pattern, expires_at, created_at, updated_at)
+       VALUES (?, 'controller', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(name, source_type, source_id) DO UPDATE SET
          controller_cid=excluded.controller_cid, h24=excluded.h24, windows=excluded.windows, floor=excluded.floor,
-         ceiling=excluded.ceiling, expires_at=excluded.expires_at, updated_at=excluded.updated_at`
+         ceiling=excluded.ceiling, line_pattern=excluded.line_pattern, expires_at=excluded.expires_at, updated_at=excluded.updated_at`
     ).bind(name, installationId, controllerCid, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling,
-      expiresAt, nowText, nowText));
+      linePattern, expiresAt, nowText, nowText));
   }
 
   await runStatements(db, statements);
@@ -212,6 +219,7 @@ async function areasResponse(env) {
       H24Manual: Boolean(staged?.H24),
       Scheduled: Boolean(stagedWindows.length),
       Windows: stagedWindows,
+      LinePattern: staged?.LinePattern ?? null,
       LevelsEdited: Boolean(staged && (staged.Floor !== null || staged.Ceiling !== null)),
       Staged: Boolean(staged),
       Saved: controller ? false : saved,

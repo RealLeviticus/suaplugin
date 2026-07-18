@@ -5,12 +5,14 @@ A vatSys plugin and public Cloudflare control page for staging and applying Aust
 ## Features
 
 - Public control page at `https://sua.actuallyleviticus.xyz/`; no browser operator key is required.
+- Full-screen airspace map at `https://sua.actuallyleviticus.xyz/map` plots every Danger/Restricted area over Australia and highlights active (red) and pre-active (amber) areas live, refreshing every five seconds. Geometry is a static `areas.geojson` asset generated from the profile's `RestrictedAreas.xml`; the map (Leaflet with CARTO/OpenStreetMap tiles) joins it to the live shared state by area name.
 - Activations, time windows, and level edits are written directly to shared Cloudflare D1 storage. The public website operates independently of every plugin installation.
 - Each plugin is a reader of the shared desired state and applies it locally when it syncs. No inbound tunnel or router port-forward is used.
 - Each plugin uploads an immutable copy of the profile's SUA catalogue and original default schedules, plus genuine controller-created activations and level changes from the vatSys Restricted Area window. Cloud-injected activations are excluded so they cannot feed back into the shared state.
 - A scheduled Cloudflare Worker refreshes VATPAC airspace NOTAMs every minute, expands compressed designators such as `R225ABCDEF`, matches the active dataset, and stages the published activation windows automatically.
 - Plugin activations use vatSys's standard restricted-area colour with no plugin-added infill.
-- Every active SUA border is drawn with a solid line, including activations made through vatSys itself.
+- Each SUA border keeps the line pattern defined in the dataset, and controllers can change how an area is drawn from the vatSys Restricted Area window.
+- When a controller activates an area, their selected line pattern is shared to other connected controllers. A controller who did not activate the area can still restyle it locally without changing anyone else's display; the activating controller's pattern only reapplies if they change it again.
 - Dated UTC windows and temporary vertical-limit edits are supported. Original levels restore when an area is deactivated.
 - When one scheduled activation window ends, it is removed from the shared planned schedule while any later windows remain staged.
 
@@ -39,8 +41,8 @@ The local `http://localhost:5300/` endpoint is loopback-only and redirects to th
 4. When vatSys finishes loading Restricted Areas, each plugin captures the full Danger/Restricted catalogue and original default schedules. Every five seconds it uploads that dataset plus local controller-created differences and reads the aggregated desired state.
 5. Each installation has a generated ID. Cloudflare replaces that installation's leased `controller` sources on every sync, and the originating plugin excludes its own sources from the response to avoid echoing them back into vatSys.
 6. Cloud synchronisation and SUA display changes remain dormant until vatSys connects to VATSIM. On disconnect the plugin immediately clears its leased controller sources, removes shared injections and manual local activations, and restores the captured dataset state.
-7. While connected, the plugin injects/removes shared plugin activations and calls the same native `DisplayMaps.UpdateDynamicRMaps()` path used by vatSys. Missing dataset-default schedules are restored and cannot be removed.
-8. The plugin sets drawable restricted-area line patterns to solid before vatSys builds its native map and temporarily sets plugin-activated areas to `InfillType.None`. vatSys therefore keeps its own colour, width, rendering path, and minute-refresh behaviour without a replacement overlay map.
+7. While connected, the plugin injects/removes shared plugin activations and calls the same native `DisplayMaps.UpdateDynamicRMaps()` path used by vatSys. Missing dataset-default schedules are restored and cannot be removed. An activating controller uploads their selected line pattern alongside the activation; each installation applies a shared line pattern only when it changes, so a local restyle by a non-activating controller is never overwritten or re-uploaded.
+8. The plugin leaves each area's dataset-defined line pattern in place—so controllers can restyle borders from the vatSys Restricted Area window—and only temporarily sets plugin-activated areas to `InfillType.None`. vatSys therefore keeps its own colour, width, rendering path, and minute-refresh behaviour without a replacement overlay map.
 
 Multiple desired sources can coexist for an area. H24 takes precedence over timed windows; windows from all active sources are combined. Removing the final source makes the plugin deactivate the area and restore edited levels.
 
@@ -88,11 +90,18 @@ Apply D1 migrations and deploy both Cloudflare projects:
 $env:CLOUDFLARE_ACCOUNT_ID = "<account-id>"
 wrangler d1 migrations apply sua-airspace --remote --config .\cloudflare-pages\wrangler.toml
 .\build-pages.ps1
+.\build-map.ps1
 Push-Location .\cloudflare-pages
 wrangler pages deploy .\public --project-name sua-airspace --branch main
 Pop-Location
 wrangler deploy --config .\cloudflare-automation\wrangler.toml
 ```
+
+`build-map.ps1` regenerates `cloudflare-pages/public/areas.geojson` from the active
+profile's `RestrictedAreas.xml` (default
+`Documents\vatSys Files\Profiles\Australia\RestrictedAreas.xml`; override with
+`-RestrictedAreasXml`). Re-run it whenever the profile's restricted-area geometry
+changes with an AIRAC/profile update, then redeploy Pages.
 
 The automation Worker's manual `/refresh` endpoint still uses its private `SUA_SYNC_TOKEN` secret. Plugin synchronisation and the public website do not use that secret.
 
@@ -102,10 +111,13 @@ The tracked example is [SuaAirspacePlugin.config.example.json](SuaAirspacePlugin
 
 ```text
 cloudflare-pages/                 Pages UI, Functions API, and D1 migrations
+cloudflare-pages/public/map.html  full-screen Leaflet airspace map (/map)
+cloudflare-pages/public/areas.geojson  generated area geometry (build-map.ps1)
 cloudflare-automation/            scheduled VATPAC NOTAM Worker
 SuaAirspacePlugin/CloudSyncService.cs
 SuaAirspacePlugin/SuaAirspaceService.cs
 SuaAirspacePlugin/SuaUiPage.cs
 build-pages.ps1
+build-map.ps1
 build-release.ps1
 ```

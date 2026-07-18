@@ -14,8 +14,9 @@ namespace SuaAirspacePlugin;
 /// keeps real date-aware UTC windows per area and injects/removes an H24
 /// activation in vatsys.RestrictedAreas as each window opens and closes (the
 /// 1 s timer is the scheduler). The display pass preserves vatSys's standard
-/// restricted-area colour, removes plugin-area infills, and makes every active
-/// SUA border solid using complete immutable map snapshots.
+/// restricted-area colour and only removes plugin-area infills. Each area keeps
+/// the line pattern defined in the dataset, which a controller can still change
+/// from the vatSys Restricted Area window.
 /// </summary>
 public sealed class SuaAirspaceService : IDisposable
 {
@@ -62,6 +63,7 @@ public sealed class SuaAirspaceService : IDisposable
         public List<string> Windows { get; set; } = new List<string>();
         public int? Floor { get; set; }
         public int? Ceiling { get; set; }
+        public string? LinePattern { get; set; }
     }
 
     private readonly object _lock = new object();
@@ -253,6 +255,27 @@ public sealed class SuaAirspaceService : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Apply the line pattern an activating controller shared for an area. This
+    /// is a purely local display change (never re-uploaded by this installation)
+    /// so a controller who did not activate the area can still restyle it in
+    /// their own Restricted Area window without the change leaving this client.
+    /// </summary>
+    internal bool TrySetLinePattern(string name, string? pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return false;
+        if (!Enum.TryParse<DisplayMaps.Map.Patterns>(pattern, ignoreCase: true, out var parsed))
+            return false;
+
+        var area = FindArea(name, out _);
+        if (area is null) return false;
+        if (area.LinePattern == parsed) return true;
+
+        area.LinePattern = parsed;
+        RequestNativeMapRefresh();
+        return true;
+    }
+
     internal bool TryActivateWindows(string name, List<(DateTime FromUtc, DateTime ToUtc)> windows)
     {
         var area = FindArea(name, out _);
@@ -431,20 +454,17 @@ public sealed class SuaAirspaceService : IDisposable
                 {
                     var now = DateTime.UtcNow;
 
-                    // UpdateDynamicRMaps reads this source pattern each time it
-                    // rebuilds the native snapshot. Setting it here makes the
-                    // solid-border rule survive vatSys's own minute refresh.
+                    // vatSys's minute refresh can drop dataset-default
+                    // activations from its native snapshot; re-add any that went
+                    // missing. Line patterns are deliberately left untouched so
+                    // each area keeps its dataset default and whatever draw style
+                    // a controller sets from the Restricted Area window.
                     foreach (var area in instance.Areas)
                     {
                         _states.TryGetValue(area.Name, out var state);
                         if (_catalogueByName!.TryGetValue(area.Name, out var catalogueArea) &&
                             RestoreMissingDefaults(area, catalogueArea, state?.Injected))
                             changed = true;
-
-                        if (area.LinePattern == DisplayMaps.Map.Patterns.None ||
-                            area.LinePattern == DisplayMaps.Map.Patterns.Solid) continue;
-                        area.LinePattern = DisplayMaps.Map.Patterns.Solid;
-                        changed = true;
                     }
 
                     foreach (var entry in _states.ToList())
@@ -712,7 +732,8 @@ public sealed class SuaAirspaceService : IDisposable
             if (area.AltitudeFloor != catalogueArea.Floor) { area.AltitudeFloor = catalogueArea.Floor; changed = true; }
             if (area.AltitudeCeiling != catalogueArea.Ceiling) { area.AltitudeCeiling = catalogueArea.Ceiling; changed = true; }
             if (area.DAIWEnabled != defaults.DAIWEnabled) { area.DAIWEnabled = defaults.DAIWEnabled; changed = true; }
-            if (area.LinePattern != defaults.LinePattern) { area.LinePattern = defaults.LinePattern; changed = true; }
+            // Line pattern is a user/dataset display choice the plugin no longer
+            // manages, so it is not reset here.
             if (area.InfillType != defaults.InfillType) { area.InfillType = defaults.InfillType; changed = true; }
             if (area.InfillPattern != defaults.InfillPattern) { area.InfillPattern = defaults.InfillPattern; changed = true; }
         }
@@ -838,6 +859,10 @@ public sealed class SuaAirspaceService : IDisposable
                     .ToList();
 
             if (!h24 && windows.Count == 0 && !floor.HasValue && !ceiling.HasValue) continue;
+
+            // Only a genuine activation carries the controller's chosen draw
+            // style to other clients; a level-only edit leaves borders alone.
+            var linePattern = h24 || windows.Count > 0 ? area.LinePattern.ToString() : null;
             result.Add(new ControllerActivation
             {
                 Name = area.Name,
@@ -845,6 +870,7 @@ public sealed class SuaAirspaceService : IDisposable
                 Windows = windows,
                 Floor = floor,
                 Ceiling = ceiling,
+                LinePattern = linePattern,
             });
         }
 

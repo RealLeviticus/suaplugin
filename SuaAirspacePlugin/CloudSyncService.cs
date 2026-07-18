@@ -163,7 +163,8 @@ public sealed class CloudSyncService : IDisposable
                 .ToList();
             var fingerprint = (item.H24 ? "1" : "0") + "|" + string.Join(",", windows) + "|" +
                 item.Floor?.ToString(CultureInfo.InvariantCulture) + "|" +
-                item.Ceiling?.ToString(CultureInfo.InvariantCulture);
+                item.Ceiling?.ToString(CultureInfo.InvariantCulture) + "|" +
+                (item.LinePattern ?? "");
             if (_fingerprints.TryGetValue(item.Name, out var current) && current == fingerprint) continue;
 
             var applied = true;
@@ -176,6 +177,13 @@ public sealed class CloudSyncService : IDisposable
                 applied = _sua.TrySetWindows(item.Name, string.Join(",", windows)) && applied;
 
             if (!applied) continue;
+
+            // Applying the owner's draw style only when the fingerprint changes
+            // means a local restyle by a non-activating controller survives every
+            // subsequent sync until the activating controller changes it again.
+            if (!string.IsNullOrWhiteSpace(item.LinePattern))
+                _sua.TrySetLinePattern(item.Name, item.LinePattern);
+
             _managedNames.Add(item.Name);
             _fingerprints[item.Name] = fingerprint;
         }
@@ -203,5 +211,6 @@ public sealed class CloudSyncService : IDisposable
         public List<string>? Windows { get; set; }
         public int? Floor { get; set; }
         public int? Ceiling { get; set; }
+        public string? LinePattern { get; set; }
     }
 }

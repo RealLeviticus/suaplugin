@@ -561,9 +561,6 @@ async function updateActivationRequest(request, env) {
   const id = String(body?.Id || "").trim();
   const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [];
   const areaNames = Array.from(new Set(submittedAreas.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 50);
-  const requester = String(body?.Requester || "").trim().slice(0, 80);
-  const contactEmail = String(body?.ContactEmail || "").trim().toLowerCase().slice(0, 254);
-  const notes = String(body?.Notes || "").trim().slice(0, 500);
   const raCategory = String(body?.RaCategory || "").trim().toUpperCase();
   const start = new Date(String(body?.StartUtc || ""));
   const end = new Date(String(body?.EndUtc || ""));
@@ -572,9 +569,6 @@ async function updateActivationRequest(request, env) {
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
   }
-  if (!requester) return json({ Success: false, Error: "Name or CID is required." }, 400);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return json({ Success: false, Error: "A valid contact email is required." }, 400);
-  if (!notes) return json({ Success: false, Error: "Activation details are required. Explain why the airspace should be activated." }, 400);
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
     return json({ Success: false, Error: "Valid start and end times are required." }, 400);
@@ -585,9 +579,9 @@ async function updateActivationRequest(request, env) {
 
   const result = await env.DB.prepare(
     `UPDATE activation_requests
-        SET area_name = ?, area_names = ?, requester = ?, contact_email = ?, start_utc = ?, end_utc = ?, notes = ?, ra_category = ?
+        SET area_name = ?, area_names = ?, start_utc = ?, end_utc = ?, ra_category = ?
       WHERE id = ? AND status = 'pending'`
-  ).bind(areaNames[0], JSON.stringify(areaNames), requester, contactEmail, start.toISOString(), end.toISOString(), notes, raCategory, id).run();
+  ).bind(areaNames[0], JSON.stringify(areaNames), start.toISOString(), end.toISOString(), raCategory, id).run();
   if (!result.meta?.changes) return json({ Success: false, Error: "This request is no longer pending." }, 409);
   return json({ Success: true, Id: id });
 }

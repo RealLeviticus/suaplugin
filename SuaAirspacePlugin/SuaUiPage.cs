@@ -65,7 +65,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .request-panel.open{display:block;}.request-box{max-width:820px;margin:auto;background:#a0aaaa;border:3px solid #5a6a6a;box-shadow:8px 8px 0 rgba(0,0,0,.3)}
 .request-head{display:flex;align-items:center;gap:10px;padding:10px;background:#5a6a6a;color:#e0e8e8;letter-spacing:1px}.request-head span{margin-right:auto}
 .request-card{padding:12px;border-top:1px solid #5a6a6a;color:#101820}.request-card:first-child{border-top:0}.request-title{color:#000060;font-size:15px}.request-meta{margin-top:5px;font-size:12px;color:#344444}.request-notes{margin-top:7px;white-space:pre-wrap;font-weight:normal}.request-actions{display:flex;gap:7px;margin-top:9px}.request-actions button{width:110px}
-.request-edit{margin-top:10px;padding:10px;border:2px solid #5a6a6a;background:#96a4a4;display:grid;grid-template-columns:1fr 1fr;gap:9px}.request-edit .full{grid-column:1/-1}.request-edit label{display:block;color:#404a4a;font-size:11px;margin-bottom:3px}.request-edit input,.request-edit select,.request-edit textarea{width:100%;background:#c8d0d0}.request-edit select[multiple]{height:130px}.request-edit textarea{min-height:60px;resize:vertical}.request-edit .request-actions{grid-column:1/-1;margin-top:0}
+.request-edit{margin-top:10px;padding:10px;border:2px solid #5a6a6a;background:#96a4a4;display:grid;grid-template-columns:1fr 1fr;gap:9px}.request-edit .full{grid-column:1/-1}.request-edit label{display:block;color:#404a4a;font-size:11px;margin-bottom:3px}.request-edit input,.request-edit select{width:100%;background:#c8d0d0}.request-area-list{border:2px solid #5a6a6a;background:#a0aaaa;max-height:220px;overflow:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.request-edit .request-area-option{display:flex;align-items:center;gap:7px;padding:7px 9px;margin:0;border-right:1px solid #829292;border-bottom:1px solid #829292;color:#101820;cursor:pointer}.request-edit .request-area-option:hover{background:#b2bbbb}.request-edit .request-area-option input{width:auto;accent-color:#000060}.request-area-option .area-type{margin-left:auto;color:#404a4a}.request-edit .request-actions{grid-column:1/-1;margin-top:0}
 @media (max-width:760px){
   .row{grid-template-columns:minmax(0,1fr) 100px 60px;grid-template-areas:'name type cat' 'status status status' 'actions actions actions';grid-auto-rows:auto;}
   .row .nm{grid-area:name;}
@@ -76,7 +76,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
   .row > .sched,.row > .lv{display:none;}
   .row.head{grid-template-areas:'name type cat';}
   .row.head .st,.row.head .ac{display:none;}
-  .request-edit{grid-template-columns:1fr}.request-edit .full{grid-column:auto}
+  .request-edit{grid-template-columns:1fr}.request-edit .full{grid-column:auto}.request-area-list{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -358,19 +358,16 @@ button.danger-btn{border-color:#600000;color:#600000;}
 
   function renderRequestEditor(q){
     var selectedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
-    var options = '';
+    var checkboxes = '';
     for (var i = 0; i < areas.length; i++){
-      options += ""<option value='"" + esc(areas[i].Name) + ""'"" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' selected' : '') + "">"" + esc(areas[i].Name) + "" ("" + esc(areas[i].Type) + "")</option>"";
+      checkboxes += ""<label class='request-area-option'><input type='checkbox' value='"" + esc(areas[i].Name) + ""'"" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + "">"" + esc(areas[i].Name) + "" <span class='area-type'>"" + esc(areas[i].Type) + ""</span></label>"";
     }
     var category = q.RaCategory || 'RA1';
     return ""<div class='request-edit'>""
-      + ""<div class='full'><label>AIRSPACE (CTRL/SHIFT TO SELECT MULTIPLE)</label><select id='rqAreas-"" + esc(q.Id) + ""' multiple>"" + options + ""</select></div>""
+      + ""<div class='full'><label>AIRSPACE</label><div class='request-area-list' id='rqAreas-"" + esc(q.Id) + ""'>"" + checkboxes + ""</div></div>""
       + ""<div><label>START (UTC)</label><input id='rqStart-"" + esc(q.Id) + ""' type='datetime-local' value='"" + esc(requestInputTime(q.StartUtc)) + ""'></div>""
       + ""<div><label>END (UTC)</label><input id='rqEnd-"" + esc(q.Id) + ""' type='datetime-local' value='"" + esc(requestInputTime(q.EndUtc)) + ""'></div>""
       + ""<div><label>RA CATEGORY</label><select id='rqCategory-"" + esc(q.Id) + ""'><option"" + (category === 'RA1' ? ' selected' : '') + "">RA1</option><option"" + (category === 'RA2' ? ' selected' : '') + "">RA2</option><option"" + (category === 'RA3' ? ' selected' : '') + "">RA3</option></select></div>""
-      + ""<div><label>NAME OR CID</label><input id='rqRequester-"" + esc(q.Id) + ""' maxlength='80' required value='"" + esc(q.Requester) + ""'></div>""
-      + ""<div><label>CONTACT EMAIL</label><input id='rqEmail-"" + esc(q.Id) + ""' type='email' maxlength='254' value='"" + esc(q.ContactEmail || '') + ""'></div>""
-      + ""<div class='full'><label>ACTIVATION DETAILS</label><textarea id='rqNotes-"" + esc(q.Id) + ""' maxlength='500' required>"" + esc(q.Notes || '') + ""</textarea></div>""
       + ""<div class='request-actions'><button onclick=\""saveRequestEdit('"" + esc(q.Id) + ""')\"">SAVE CHANGES</button><button onclick='cancelRequestEdit()'>CANCEL</button></div></div>"";
   }
 
@@ -397,17 +394,14 @@ button.danger-btn{border-color:#600000;color:#600000;}
   window.editRequest = function(id){ editingRequest = id; loadRequests(); };
   window.cancelRequestEdit = function(){ editingRequest = null; loadRequests(); };
   window.saveRequestEdit = function(id){
-    var areaSelect = document.getElementById('rqAreas-' + id);
+    var areaInputs = document.getElementById('rqAreas-' + id).getElementsByTagName('input');
     var names = [];
-    for (var i = 0; i < areaSelect.options.length; i++) if (areaSelect.options[i].selected) names.push(areaSelect.options[i].value);
+    for (var i = 0; i < areaInputs.length; i++) if (areaInputs[i].checked) names.push(areaInputs[i].value);
     var payload = {
       Id: id, AreaNames: names,
       StartUtc: document.getElementById('rqStart-' + id).value + ':00Z',
       EndUtc: document.getElementById('rqEnd-' + id).value + ':00Z',
-      RaCategory: document.getElementById('rqCategory-' + id).value,
-      Requester: document.getElementById('rqRequester-' + id).value,
-      ContactEmail: document.getElementById('rqEmail-' + id).value,
-      Notes: document.getElementById('rqNotes-' + id).value
+      RaCategory: document.getElementById('rqCategory-' + id).value
     };
     fetch('/api/sua/requests/update', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })
       .then(function(r){ return r.json(); }).then(function(d){

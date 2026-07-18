@@ -28,7 +28,7 @@ Open `https://sua.actuallyleviticus.xyz/`.
 - `ACT` saves an H24 or duration-based shared activation. `DEACT` clears saved shared sources; vatSys-native/default activations are read-only and remain active.
 - `EDIT` changes levels or replaces the area's dated UTC activation windows.
 - `SAVED` means the desired state is stored in D1 and is available to every plugin installation independently.
-- Pending activation requests can be edited from the `REQUESTS` panel before review, including their selected areas, RA category, UTC times, name or CID, contact email, and activation details. Accepted or declined requests are no longer editable.
+- Pending activation requests can be edited from the `REQUESTS` panel before review, but only their selected areas, RA category, and UTC times can be changed. The submitted name or CID, contact email, and activation details remain read-only. Accepted or declined requests are no longer editable.
 - `USER: CID` identifies a live activation configured by that controller in vatSys and shared to other connected controllers. The CID comes directly from vatSys's connection state. These sources use a short renewable lease so they disappear after the originating plugin disconnects.
 - A live vatSys controller activation displays only its timing state (`ACTIVE`, `PREACT`, or `OFF`) and `USER: CID`; overlapping stored sources do not add `MAN`, `SCHED`, or `SAVED` badges to that row.
 - Controllers connected with the OBS facility can view dataset and shared SUA, but cannot retain or publish Restricted Area activations, regardless of their underlying VATSIM certification rating. Local OBS changes are restored to the dataset/shared state and the cloud API ignores OBS controller activations.
@@ -118,11 +118,16 @@ The automation Worker's manual `/refresh` endpoint still uses its private `SUA_S
 
 The tracked example is [SuaAirspacePlugin.config.example.json](SuaAirspacePlugin.config.example.json). Restart vatSys after replacing the DLL or configuration.
 
+## VATPAC Docker/PostgreSQL Hosting
+
+A conventional container deployment is available in [vatpac-hosting](vatpac-hosting/README.md). It runs the same static site, API, plugin sync, VATSIM OAuth, Discord notifications, and scheduled refresh logic on Node.js with PostgreSQL. This is separate from, and does not replace, the current Cloudflare deployment.
+
 ## Project Structure
 
 ```text
 cloudflare-pages/                 Pages UI, Functions API, and D1 migrations
 cloudflare-pages/public/map.html  full-screen Leaflet airspace map (/map)
+vatpac-hosting/                   Docker, PostgreSQL schema, Node host, and VATPAC handoff guide
 cloudflare-pages/public/areas.geojson  generated area geometry (build-map.ps1)
 cloudflare-automation/            scheduled VATPAC NOTAM Worker
 SuaAirspacePlugin/CloudSyncService.cs

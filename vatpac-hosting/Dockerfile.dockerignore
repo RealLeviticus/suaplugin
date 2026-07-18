@@ -1,0 +1,11 @@
+.git
+.vs
+artifacts
+dist
+**/bin
+**/obj
+**/.wrangler
+vatpac-hosting/node_modules
+debug.log
+*.config.json
+.env

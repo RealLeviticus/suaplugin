@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sua_airspace}
+      POSTGRES_USER: ${POSTGRES_USER:-sua_airspace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  site:
+    build:
+      context: ..
+      dockerfile: vatpac-hosting/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-sua_airspace}
+      PGUSER: ${POSTGRES_USER:-sua_airspace}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_SSL: "false"
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      SUA_SYNC_TOKEN: ${SUA_SYNC_TOKEN:?Set SUA_SYNC_TOKEN in .env}
+      DISCORD_REQUEST_WEBHOOK_URL: ${DISCORD_REQUEST_WEBHOOK_URL:-}
+      VATSIM_AUTH_REQUIRED: ${VATSIM_AUTH_REQUIRED:-false}
+      VATSIM_CLIENT_ID: ${VATSIM_CLIENT_ID:-}
+      VATSIM_CLIENT_SECRET: ${VATSIM_CLIENT_SECRET:-}
+      VATSIM_REDIRECT_URI: ${VATSIM_REDIRECT_URI:-}
+      AUTHORIZED_VATSIM_CIDS: ${AUTHORIZED_VATSIM_CIDS:-}
+      AUTOMATION_ENABLED: ${AUTOMATION_ENABLED:-true}
+      AUTOMATION_INTERVAL_SECONDS: ${AUTOMATION_INTERVAL_SECONDS:-60}
+      AUTOMATION_RUN_ON_START: ${AUTOMATION_RUN_ON_START:-true}
+    ports:
+      - "${SITE_PORT:-8080}:8080"
+
+volumes:
+  postgres-data:

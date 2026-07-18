@@ -13,6 +13,9 @@ The container currently imports the proven application modules and static assets
 - HJ and HN activation modes calculate rolling sunrise/sunset windows at each area's dataset-derived geographic centre.
 - Activation requests can carry multiple separate time slots; accepted requests activate, deactivate between slots, and reactivate for later slots.
 - Each requested area carries its own RA category, and active Danger areas use a broken border.
+- The manager includes independent type and status filters, a compact centred editor, and bulk copying of levels and activation timing across selected Danger, Restricted, and Military areas. RA categories are copied only where they apply.
+- The live map includes type/status filters, SUA name search, fit-to-filtered-results controls, and five-second state refreshes.
+- Scheduled activations deactivate automatically at the end of their windows; the vatSys plugin does not display a deactivation prompt.
 - `GET /healthz` checks both the HTTP process and PostgreSQL connection.
 
 The compose file is suitable for evaluation and a simple single-host deployment. VATPAC can point an existing managed PostgreSQL service at the site container instead by setting `DATABASE_URL` and deploying only the `site` image.
@@ -35,6 +38,8 @@ To build only the application image from the repository root:
 ```sh
 docker build -f vatpac-hosting/Dockerfile -t sua-airspace:latest .
 ```
+
+The image copies the current `cloudflare-pages/public`, `cloudflare-pages/functions`, and `cloudflare-automation/src` trees during every build. Rebuild the image after updating the repository so the Docker deployment receives the same manager, map, API, and automation code as the Cloudflare test deployment.
 
 The site should sit behind VATPAC's HTTPS reverse proxy or ingress. The proxy must preserve `Host` and set `X-Forwarded-Proto: https`. `PUBLIC_BASE_URL` is the authoritative external URL and avoids ambiguity when OAuth redirects are generated behind a proxy.
 

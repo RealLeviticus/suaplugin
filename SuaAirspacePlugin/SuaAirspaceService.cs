@@ -106,10 +106,10 @@ public sealed class SuaAirspaceService : IDisposable
         set => _expiryNotification.RetainAreaAsync = value;
     }
 
-    internal void UpdateNotamWindows(string name, IEnumerable<string>? windows) =>
+    internal void UpdateDeactivationWindows(string name, IEnumerable<string>? windows) =>
         _expiryNotification.Update(name, windows);
 
-    internal void RemoveMissingNotamWindows(IEnumerable<string> names) =>
+    internal void RemoveMissingDeactivationWindows(IEnumerable<string> names) =>
         _expiryNotification.RemoveMissing(names);
 
     private bool TryRetainAsControllerActivation(string name)

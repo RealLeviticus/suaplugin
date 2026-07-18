@@ -146,8 +146,8 @@ public sealed class CloudSyncService : IDisposable
             .ToDictionary(item => item.Name, StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in incoming.Values)
-            _sua.UpdateNotamWindows(item.Name, item.NotamWindows);
-        _sua.RemoveMissingNotamWindows(incoming.Keys);
+            _sua.UpdateDeactivationWindows(item.Name, item.DeactivationWindows);
+        _sua.RemoveMissingDeactivationWindows(incoming.Keys);
 
         foreach (var previous in _managedNames.Where(name => !incoming.ContainsKey(name)).ToList())
         {
@@ -212,7 +212,7 @@ public sealed class CloudSyncService : IDisposable
         public string Name { get; set; } = "";
         public bool H24 { get; set; }
         public List<string>? Windows { get; set; }
-        public List<string>? NotamWindows { get; set; }
+        public List<string>? DeactivationWindows { get; set; }
         public int? Floor { get; set; }
         public int? Ceiling { get; set; }
         public string? LinePattern { get; set; }

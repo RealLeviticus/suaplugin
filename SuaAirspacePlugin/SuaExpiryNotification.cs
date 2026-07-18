@@ -13,10 +13,14 @@ internal sealed class SuaExpiryNotification : IDisposable
 {
     private const string WindowFormat = "yyyyMMddHHmm";
     private readonly object _lock = new object();
-    private readonly Dictionary<string, List<(DateTime From, DateTime To)>> _notamWindows =
+    private readonly Dictionary<string, List<(DateTime From, DateTime To)>> _scheduledWindows =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _handled = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<Form> _openPopups = new();
+    private readonly Dictionary<string, DateTime> _popupAreas = new(StringComparer.OrdinalIgnoreCase);
+    private Form? _popup;
+    private Label? _popupDetail;
+    private Button? _keepButton;
+    private Button? _allowButton;
     private bool _disposed;
 
     internal Func<string, Task<bool>>? RetainAreaAsync { get; set; }
@@ -33,8 +37,8 @@ internal sealed class SuaExpiryNotification : IDisposable
 
         lock (_lock)
         {
-            if (parsed.Count == 0) _notamWindows.Remove(name);
-            else _notamWindows[name] = parsed;
+            if (parsed.Count == 0) _scheduledWindows.Remove(name);
+            else _scheduledWindows[name] = parsed;
         }
     }
 
@@ -42,8 +46,8 @@ internal sealed class SuaExpiryNotification : IDisposable
     {
         var current = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
         lock (_lock)
-            foreach (var name in _notamWindows.Keys.Where(name => !current.Contains(name)).ToList())
-                _notamWindows.Remove(name);
+            foreach (var name in _scheduledWindows.Keys.Where(name => !current.Contains(name)).ToList())
+                _scheduledWindows.Remove(name);
     }
 
     internal void Check(RestrictedAreas instance)
@@ -60,13 +64,14 @@ internal sealed class SuaExpiryNotification : IDisposable
         List<(string Name, DateTime To)> due;
         lock (_lock)
         {
-            due = _notamWindows.SelectMany(pair => pair.Value
+            due = _scheduledWindows.SelectMany(pair => pair.Value
                     .Where(window => now >= window.From && window.To > now && window.To <= now.AddMinutes(10))
                     .Select(window => (pair.Key, window.To)))
                 .Where(item => !_handled.Contains(NotificationKey(item.Key, item.To)))
                 .ToList();
         }
 
+        var eligible = new List<(string Name, DateTime To)>();
         foreach (var item in due)
         {
             var area = instance.Areas.FirstOrDefault(candidate =>
@@ -78,8 +83,10 @@ internal sealed class SuaExpiryNotification : IDisposable
                 var key = NotificationKey(item.Name, item.To);
                 if (!_handled.Add(key)) continue;
             }
-            QueuePopup(item.Name, item.To);
+            eligible.Add(item);
         }
+
+        if (eligible.Count > 0) QueuePopup(eligible);
 
         lock (_lock)
             _handled.RemoveWhere(key => DateTime.TryParseExact(key.Substring(key.LastIndexOf('|') + 1),
@@ -136,56 +143,105 @@ internal sealed class SuaExpiryNotification : IDisposable
                ((cdA > 0 && cdB < 0) || (cdA < 0 && cdB > 0));
     }
 
-    private void QueuePopup(string name, DateTime endUtc)
+    private void QueuePopup(IReadOnlyCollection<(string Name, DateTime To)> areas)
     {
         var host = Application.OpenForms.Cast<Form>().FirstOrDefault(form => !form.IsDisposed && form.IsHandleCreated);
         if (host is null) return;
-        Action show = () => ShowPopup(name, endUtc);
+        Action show = () => ShowPopup(areas);
         if (host.InvokeRequired) host.BeginInvoke(show); else show();
     }
 
-    private void ShowPopup(string name, DateTime endUtc)
+    private void ShowPopup(IEnumerable<(string Name, DateTime To)> areas)
     {
         if (_disposed) return;
-        var popup = new Form
+        foreach (var area in areas) _popupAreas[area.Name] = area.To;
+        if (_popup is not null && !_popup.IsDisposed)
         {
-            FormBorderStyle = FormBorderStyle.FixedToolWindow, ShowInTaskbar = false, TopMost = true,
-            StartPosition = FormStartPosition.Manual, ClientSize = new Size(330, 142),
-            BackColor = Color.FromArgb(143, 156, 156), Text = "SUA DEACTIVATION"
-        };
-        var title = new Label { Text = "SUA DEACTIVATION DUE", ForeColor = Color.Navy, Font = new Font("Arial", 10, FontStyle.Bold), AutoSize = true, Location = new Point(12, 10) };
-        var detail = new Label { Text = $"{name} is scheduled to deactivate at {endUtc:HHmm}Z as per NOTAM.\r\nKeep this airspace active?", AutoSize = false, Size = new Size(306, 52), Location = new Point(12, 36) };
-        var keep = new Button { Text = "KEEP ACTIVE", Size = new Size(145, 30), Location = new Point(12, 98) };
-        var allow = new Button { Text = "NO - DEACTIVATE", Size = new Size(145, 30), Location = new Point(173, 98) };
-        keep.Click += async (_, _) =>
+            UpdatePopupText();
+            return;
+        }
+
+        var terminal = new Font("Terminus (TTF)", 18, FontStyle.Bold, GraphicsUnit.Pixel);
+        _popup = new BaseForm
         {
-            keep.Enabled = allow.Enabled = false;
-            keep.Text = "SAVING...";
-            var success = RetainAreaAsync is not null && await RetainAreaAsync(name);
-            if (success) popup.Close();
-            else { keep.Text = "RETRY KEEP ACTIVE"; keep.Enabled = allow.Enabled = true; }
+            Resizeable = false, FormBorderStyle = FormBorderStyle.FixedToolWindow,
+            ShowInTaskbar = false, TopMost = true, StartPosition = FormStartPosition.Manual,
+            ClientSize = new Size(520, 150), MinimumSize = new Size(300, 140),
+            Text = "SUA DEACTIVATION"
         };
-        allow.Click += (_, _) => popup.Close();
-        popup.FormClosed += (_, _) => { _openPopups.Remove(popup); popup.Dispose(); RepositionPopups(); };
-        popup.Controls.AddRange(new Control[] { title, detail, keep, allow });
-        _openPopups.Add(popup); RepositionPopups(); popup.Show();
+        _popupDetail = new TextLabel
+        {
+            HasBorder = false, InteractiveText = false, ForeColor = SystemColors.ControlDark,
+            Font = new Font("Terminus (TTF)", 16, FontStyle.Bold, GraphicsUnit.Pixel),
+            TextAlign = ContentAlignment.MiddleCenter, AutoSize = true,
+            MaximumSize = new Size(496, 0), Location = new Point(12, 12)
+        };
+        _keepButton = CreateVatSysButton("KEEP ACTIVE", new Point(12, 108), terminal);
+        _allowButton = CreateVatSysButton("ALLOW DEACTIVATION", new Point(266, 108), terminal);
+        _keepButton.Click += async (_, _) =>
+        {
+            if (_keepButton is null || _allowButton is null || _popup is null) return;
+            _keepButton.Enabled = _allowButton.Enabled = false;
+            _keepButton.Text = "SAVING...";
+            var names = _popupAreas.Keys.ToList();
+            var results = RetainAreaAsync is null
+                ? Enumerable.Repeat(false, names.Count).ToArray()
+                : await Task.WhenAll(names.Select(name => RetainAreaAsync(name)));
+            if (results.All(success => success)) _popup.Close();
+            else
+            {
+                _keepButton.Text = "RETRY KEEP ACTIVE";
+                _keepButton.Enabled = _allowButton.Enabled = true;
+            }
+        };
+        _allowButton.Click += (_, _) => _popup?.Close();
+        _popup.FormClosed += (_, _) =>
+        {
+            _popupAreas.Clear();
+            _popupDetail = null; _keepButton = null; _allowButton = null;
+            _popup?.Dispose(); _popup = null;
+        };
+        _popup.Controls.AddRange(new Control[] { _popupDetail, _keepButton, _allowButton });
+        UpdatePopupText();
+        var work = Screen.FromControl(_popup).WorkingArea;
+        // Clear the Windows title bar and vatSys menu strip while remaining in
+        // the controller's natural top-left notification area.
+        _popup.Location = new Point(work.Left + 12, work.Top + 58);
+        _popup.Show();
     }
 
-    private void RepositionPopups()
+    private static Button CreateVatSysButton(string text, Point location, Font font)
     {
-        for (var i = 0; i < _openPopups.Count; i++)
+        return new GenericButton
         {
-            var work = Screen.FromControl(_openPopups[i]).WorkingArea;
-            _openPopups[i].Location = new Point(work.Right - _openPopups[i].Width - 12,
-                work.Top + 12 + i * (_openPopups[i].Height + 8));
-        }
+            Text = text, Location = location, Size = new Size(242, 30), Font = font,
+            SubFont = new Font("Microsoft Sans Serif", 8.25f), SubText = "",
+            UseVisualStyleBackColor = true
+        };
+    }
+
+    private void UpdatePopupText()
+    {
+        if (_popupDetail is null) return;
+        var scheduleLines = _popupAreas
+            .GroupBy(area => area.Value)
+            .OrderBy(group => group.Key)
+            .Select(group => "THE FOLLOWING SUA: " +
+                string.Join(", ", group.Select(area => area.Key).OrderBy(name => name, StringComparer.OrdinalIgnoreCase)) +
+                " IS SCHEDULED TO DEACTIVATE AT " + group.Key.ToString("HHmm", CultureInfo.InvariantCulture) + "Z.");
+        _popupDetail.Text = string.Join("\r\n\r\n", scheduleLines);
+        if (_popup is null || _keepButton is null || _allowButton is null) return;
+        var buttonY = _popupDetail.Bottom + 12;
+        _keepButton.Location = new Point(10, buttonY);
+        _allowButton.Location = new Point(266, buttonY);
+        _popup.ClientSize = new Size(520, buttonY + _keepButton.Height + 12);
     }
 
     public void Dispose()
     {
         _disposed = true;
-        foreach (var popup in _openPopups.ToList()) if (!popup.IsDisposed) popup.Close();
-        _openPopups.Clear();
+        if (_popup is not null && !_popup.IsDisposed) _popup.Close();
+        _popupAreas.Clear();
     }
 
     private static string NotificationKey(string name, DateTime endUtc) => name + "|" + endUtc.ToString(WindowFormat, CultureInfo.InvariantCulture);

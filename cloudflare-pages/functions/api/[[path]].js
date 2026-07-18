@@ -235,7 +235,7 @@ async function loadDesired(db, excludedControllerId = "") {
       continue;
     let item = byName.get(row.name);
     if (!item) {
-      item = { Name: row.name, H24: false, Windows: [], NotamWindows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [], _coverage: [] };
+      item = { Name: row.name, H24: false, Windows: [], DeactivationWindows: [], Floor: null, Ceiling: null, LinePattern: null, RaCategory: null, SolarModes: [], Sources: [], _coverage: [] };
       byName.set(row.name, item);
     }
     item.H24 = item.H24 || Boolean(row.h24);
@@ -245,10 +245,10 @@ async function loadDesired(db, excludedControllerId = "") {
     if (row.solar_mode && !item.SolarModes.includes(row.solar_mode)) item.SolarModes.push(row.solar_mode);
     for (const window of rowWindows) {
       if (!item.Windows.includes(window)) item.Windows.push(window);
-      if (row.source_type === "notam" && !item.NotamWindows.includes(window)) item.NotamWindows.push(window);
-      item._coverage.push({ Window: window, Notam: row.source_type === "notam" });
+      if (row.source_type !== "controller" && !row.solar_mode && !item.DeactivationWindows.includes(window)) item.DeactivationWindows.push(window);
+      item._coverage.push({ Window: window });
     }
-    if (row.h24) item._coverage.push({ H24: true, Notam: row.source_type === "notam" });
+    if (row.h24) item._coverage.push({ H24: true });
     if (row.floor !== null && row.floor !== undefined) item.Floor = Number(row.floor);
     if (row.ceiling !== null && row.ceiling !== undefined) item.Ceiling = Number(row.ceiling);
     // Rows are ordered by updated_at, so the most recent activating controller's
@@ -261,7 +261,7 @@ async function loadDesired(db, excludedControllerId = "") {
 
   for (const item of byName.values()) {
     item.Windows.sort();
-    item.NotamWindows = item.NotamWindows.filter(candidate => {
+    item.DeactivationWindows = item.DeactivationWindows.filter(candidate => {
       const end = candidate.slice(13);
       return !item._coverage.some(coverage =>
         coverage.H24 || (coverage.Window && coverage.Window !== candidate && coverage.Window.slice(0, 12) <= end && coverage.Window.slice(13) > end));

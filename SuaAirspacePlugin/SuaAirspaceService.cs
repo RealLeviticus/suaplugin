@@ -284,7 +284,11 @@ public sealed class SuaAirspaceService : IDisposable
         if (area is null) return false;
 
         DisplayMaps.Map.Patterns pattern;
-        switch ((category ?? "").Trim().ToUpperInvariant())
+        if (string.Equals(fallbackPattern, "Broken", StringComparison.OrdinalIgnoreCase))
+        {
+            pattern = DisplayMaps.Map.Patterns.Broken;
+        }
+        else switch ((category ?? "").Trim().ToUpperInvariant())
         {
             case "RA1": pattern = DisplayMaps.Map.Patterns.Dashed; break;
             case "RA2": pattern = DisplayMaps.Map.Patterns.Dotted; break;
@@ -294,7 +298,7 @@ public sealed class SuaAirspaceService : IDisposable
                 break;
         }
 
-        var categoryKnown = pattern == DisplayMaps.Map.Patterns.Dashed ||
+        var categoryKnown = pattern == DisplayMaps.Map.Patterns.Dashed || pattern == DisplayMaps.Map.Patterns.Broken ||
             pattern == DisplayMaps.Map.Patterns.Dotted || pattern == DisplayMaps.Map.Patterns.Solid;
         if (!categoryKnown) return true;
         var desiredDaiw = pattern != DisplayMaps.Map.Patterns.Dashed;

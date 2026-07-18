@@ -103,6 +103,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
   function dashFor(pattern){
     switch ((pattern || '').toLowerCase()){
       case 'dashed': return { dashArray:'8,6', cap:'butt', faint:false };
+      case 'broken': return { dashArray:'12,4,3,4', cap:'butt', faint:false };
       case 'dotted': return { dashArray:'1,6', cap:'round', faint:false };
       case 'none':   return { dashArray:'2,8', cap:'butt', faint:true };
       default:       return { dashArray:null, cap:'round', faint:false };  // Solid

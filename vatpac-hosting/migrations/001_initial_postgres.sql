@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS activation_requests (
     id TEXT PRIMARY KEY,
     area_name TEXT NOT NULL,
     area_names TEXT NOT NULL DEFAULT '[]',
+    area_categories TEXT NOT NULL DEFAULT '[]',
     requester TEXT NOT NULL,
     contact_email TEXT NOT NULL DEFAULT '',
     start_utc TEXT NOT NULL,

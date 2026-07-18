@@ -12,6 +12,7 @@ The container currently imports the proven application modules and static assets
 - The canonical vatSys area dataset and VATPAC NOTAM feed refresh every 60 seconds by default. Overlapping refreshes are suppressed.
 - HJ and HN activation modes calculate rolling sunrise/sunset windows at each area's dataset-derived geographic centre.
 - Activation requests can carry multiple separate time slots; accepted requests activate, deactivate between slots, and reactivate for later slots.
+- Each requested area carries its own RA category, and active Danger areas use a broken border.
 - `GET /healthz` checks both the HTTP process and PostgreSQL connection.
 
 The compose file is suitable for evaluation and a simple single-host deployment. VATPAC can point an existing managed PostgreSQL service at the site container instead by setting `DATABASE_URL` and deploying only the `site` image.

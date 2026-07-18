@@ -63,6 +63,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .request-card{padding:12px;border-top:1px solid #5a6a6a;color:#101820}.request-card:first-child{border-top:0}.request-title{color:#000060;font-size:15px}.request-meta{margin-top:5px;font-size:12px;color:#344444}.request-notes{margin-top:7px;white-space:pre-wrap;font-weight:normal}.request-actions{display:flex;gap:7px;margin-top:9px}.request-actions button{width:110px}
 .request-edit{margin-top:10px;padding:10px;border:2px solid #5a6a6a;background:#96a4a4;display:grid;grid-template-columns:1fr 1fr;gap:9px}.request-edit .full{grid-column:1/-1}.request-edit label{display:block;color:#404a4a;font-size:11px;margin-bottom:3px}.request-edit input,.request-edit select{width:100%;background:#c8d0d0}.request-area-list{border:2px solid #5a6a6a;background:#a0aaaa;max-height:220px;overflow:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.request-edit .request-area-option{display:flex;align-items:center;gap:7px;padding:7px 9px;margin:0;border-right:1px solid #829292;border-bottom:1px solid #829292;color:#101820;cursor:pointer}.request-edit .request-area-option:hover{background:#b2bbbb}.request-edit .request-area-option input{width:auto;accent-color:#000060}.request-area-option .area-type{margin-left:auto;color:#404a4a}.request-edit .request-actions{grid-column:1/-1;margin-top:0}
 .request-slot{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:8px;border:1px solid #5a6a6a}.request-slot button{height:31px}
+.request-edit .request-area-option select{width:auto;margin-left:5px;padding:3px}
 @media (max-width:760px){
   .row{grid-template-columns:minmax(0,1fr) 100px 60px;grid-template-areas:'name type cat' 'status status status' 'actions actions actions';grid-auto-rows:auto;}
   .row .nm{grid-area:name;}
@@ -402,15 +403,17 @@ button.danger-btn{border-color:#600000;color:#600000;}
 
   function renderRequestEditor(q){
     var selectedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
+    var selectedCategories = {};
+    var categoryItems = q.AreaCategories && q.AreaCategories.length ? q.AreaCategories : [];
+    for (var c = 0; c < categoryItems.length; c++) selectedCategories[categoryItems[c].Name] = categoryItems[c].RaCategory;
     var checkboxes = '';
     for (var i = 0; i < areas.length; i++){
-      checkboxes += "<label class='request-area-option'><input type='checkbox' value='" + esc(areas[i].Name) + "'" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + ">" + esc(areas[i].Name) + " <span class='area-type'>" + esc(areas[i].Type) + "</span></label>";
+      var areaCategory = selectedCategories[areas[i].Name] || q.RaCategory || 'RA1';
+      checkboxes += "<label class='request-area-option'><input type='checkbox' value='" + esc(areas[i].Name) + "'" + (selectedNames.indexOf(areas[i].Name) >= 0 ? ' checked' : '') + ">" + esc(areas[i].Name) + " <span class='area-type'>" + esc(areas[i].Type) + "</span><select><option" + (areaCategory === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (areaCategory === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (areaCategory === 'RA3' ? ' selected' : '') + ">RA3</option></select></label>";
     }
-    var category = q.RaCategory || 'RA1';
     return "<div class='request-edit'>"
       + "<div class='full'><label>AIRSPACE</label><div class='request-area-list' id='rqAreas-" + esc(q.Id) + "'>" + checkboxes + "</div></div>"
       + "<div class='full'><label>ACTIVATION TIME SLOTS</label>" + requestSlotsEditor(q) + "</div>"
-      + "<div><label>RA CATEGORY</label><select id='rqCategory-" + esc(q.Id) + "'><option" + (category === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (category === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (category === 'RA3' ? ' selected' : '') + ">RA3</option></select></div>"
       + "<div class='request-actions'><button onclick=\"saveRequestEdit('" + esc(q.Id) + "')\">SAVE CHANGES</button><button onclick='cancelRequestEdit()'>CANCEL</button></div></div>";
   }
 
@@ -423,12 +426,14 @@ button.danger-btn{border-color:#600000;color:#600000;}
       for (var i = 0; i < requests.length; i++){
         var q = requests[i];
         var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
-        var category = q.RaCategory || 'RA1';
+        var categoryItems = q.AreaCategories && q.AreaCategories.length ? q.AreaCategories : requestedNames.map(function(name){ return {Name:name,RaCategory:q.RaCategory || 'RA1'}; });
+        var title = '';
+        for (var c = 0; c < categoryItems.length; c++) title += (c ? ', ' : '') + esc(categoryItems[c].Name) + " <span class='pill " + esc(categoryItems[c].RaCategory.toLowerCase()) + "'>" + esc(categoryItems[c].RaCategory) + "</span>";
         var requestWindows = q.Windows && q.Windows.length ? q.Windows : [];
         var slotSummary = '';
         for (var w = 0; w < requestWindows.length; w++) slotSummary += "<div>SLOT " + (w + 1) + ' · ' + requestWindowLabel(requestWindows[w]) + "</div>";
         if (!slotSummary) slotSummary = esc(showRequestTime(q.StartUtc)) + " &ndash; " + esc(showRequestTime(q.EndUtc));
-        html += "<div class='request-card'><div class='request-title'>" + esc(requestedNames.join(', ')) + " <span class='pill " + category.toLowerCase() + "'>" + esc(category) + "</span></div>"
+        html += "<div class='request-card'><div class='request-title'>" + title + "</div>"
           + "<div class='request-meta'>" + slotSummary + "<div>REQUESTED BY " + esc(q.Requester) + " &bull; " + esc(q.ContactEmail || '') + "</div></div>"
           + (q.Notes ? "<div class='request-notes'>" + esc(q.Notes) + "</div>" : '')
           + "<div class='request-actions'><button onclick=\"editRequest('" + esc(q.Id) + "')\">EDIT</button><button onclick=\"reviewRequest('" + esc(q.Id) + "','accept')\">ACCEPT</button><button class='danger-btn' onclick=\"reviewRequest('" + esc(q.Id) + "','decline')\">DECLINE</button></div>"
@@ -464,11 +469,11 @@ button.danger-btn{border-color:#600000;color:#600000;}
     syncRequestSlots(id);
     var areaInputs = document.getElementById('rqAreas-' + id).getElementsByTagName('input');
     var names = [];
-    for (var i = 0; i < areaInputs.length; i++) if (areaInputs[i].checked) names.push(areaInputs[i].value);
+    var areaCategories = [];
+    for (var i = 0; i < areaInputs.length; i++) if (areaInputs[i].checked){ names.push(areaInputs[i].value); areaCategories.push({Name:areaInputs[i].value, RaCategory:areaInputs[i].parentNode.querySelector('select').value}); }
     var payload = {
-      Id: id, AreaNames: names,
-      Windows: requestEditWindows.map(function(w){ return {StartUtc:w.Start + ':00Z', EndUtc:w.End + ':00Z'}; }),
-      RaCategory: document.getElementById('rqCategory-' + id).value
+      Id: id, AreaCategories: areaCategories,
+      Windows: requestEditWindows.map(function(w){ return {StartUtc:w.Start + ':00Z', EndUtc:w.End + ':00Z'}; })
     };
     fetch('/api/sua/requests/update', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })
       .then(function(r){ return r.json(); }).then(function(d){

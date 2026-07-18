@@ -29,6 +29,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
 .leaflet-popup-content .st-act{color:#a00000;}
 .leaflet-popup-content .st-pre{color:#7a5a00;}
 .leaflet-popup-content .st-off{color:#404a4a;}
+.leaflet-popup-content .ra-tag{display:inline-block;padding:2px 6px;border:1px solid;margin-left:4px;color:#fff;}.leaflet-popup-content .ra1{background:#008040;border-color:#005828;}.leaflet-popup-content .ra2{background:#d0b000;border-color:#806800;color:#000;}.leaflet-popup-content .ra3{background:#c00000;border-color:#800000;}
 .leaflet-bar a{background:#829292;color:#000060;border-bottom-color:#5a6a6a;}
 </style>
 </head>
@@ -136,7 +137,7 @@ html,body{height:100%;font-family:'Terminus',monospace;font-weight:bold;}
       : (a.PreActive ? '<span class="st-pre">PRE-ACTIVE</span>' : '<span class="st-off">DEACTIVE</span>');
     var html = '<div class="pn">' + props.name + '</div>'
       + (props.type || '').toUpperCase() + ' &middot; ' + lv(props.floor) + '&ndash;' + lv(props.ceiling) + '<br>'
-      + 'STATUS: ' + status
+      + 'STATUS: ' + status + (a.RaCategory ? ' <span class="ra-tag ' + a.RaCategory.toLowerCase() + '">' + a.RaCategory + '</span>' : '')
       + '<br>DRAW: ' + (patternFor(props) || 'Solid').toUpperCase();
     if (a.Controller){
       var u = 'USER';

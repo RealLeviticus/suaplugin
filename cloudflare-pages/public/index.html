@@ -33,7 +33,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .nt-card .nt-unmatched{color:#600000;font-size:12px;margin-top:2px;}
 .nt-card button{margin-top:6px;margin-right:6px;}
 .list{padding:0 14px 24px;}
-.row{display:grid;grid-template-columns:150px 46px 140px minmax(180px,1fr) 280px 140px;gap:8px;align-items:center;background:#8f9c9c;border:1px solid #5a6a6a;border-top:none;padding:7px 10px;font-size:13px;color:#101820;}
+.row{display:grid;grid-template-columns:150px 100px 140px minmax(180px,1fr) 280px 140px;gap:8px;align-items:center;background:#8f9c9c;border:1px solid #5a6a6a;border-top:none;padding:7px 10px;font-size:13px;color:#101820;}
 .row.head{background:#5a6a6a;color:#e0e8e8;position:sticky;top:52px;border-top:1px solid #5a6a6a;font-size:12px;letter-spacing:1px;}
 .row .nm{color:#000060;font-size:14px;}
 .pill{display:inline-block;padding:3px 8px;font-size:12px;letter-spacing:1px;border:1px solid #5a6a6a;background:#a0aaaa;color:#404a4a;}
@@ -44,6 +44,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .pill.stage{background:#304878;border-color:#182848;color:#ffffff;}
 .pill.def{background:#707878;border-color:#404848;color:#ffffff;}
 .pill.user{background:#385878;border-color:#203850;color:#ffffff;}
+.pill.ra1{background:#008040;border-color:#005828;color:#ffffff;}.pill.ra2{background:#d0b000;border-color:#806800;color:#000000;}.pill.ra3{background:#c00000;border-color:#800000;color:#ffffff;}
 .status-pills,.row-actions{display:flex;align-items:center;gap:6px;white-space:nowrap;}
 .row-actions{gap:6px;}
 .rowbtn{padding:6px 6px;width:64px;}
@@ -61,7 +62,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .request-head{display:flex;align-items:center;gap:10px;padding:10px;background:#5a6a6a;color:#e0e8e8;letter-spacing:1px}.request-head span{margin-right:auto}
 .request-card{padding:12px;border-top:1px solid #5a6a6a;color:#101820}.request-card:first-child{border-top:0}.request-title{color:#000060;font-size:15px}.request-meta{margin-top:5px;font-size:12px;color:#344444}.request-notes{margin-top:7px;white-space:pre-wrap;font-weight:normal}.request-actions{display:flex;gap:7px;margin-top:9px}.request-actions button{width:110px}
 @media (max-width:760px){
-  .row{grid-template-columns:minmax(0,1fr) 46px;grid-template-areas:'name type' 'status status' 'actions actions';grid-auto-rows:auto;}
+  .row{grid-template-columns:minmax(0,1fr) 100px;grid-template-areas:'name type' 'status status' 'actions actions';grid-auto-rows:auto;}
   .row .nm{grid-area:name;}
   .row .type{grid-area:type;}
   .row .status-pills{grid-area:status;}
@@ -84,6 +85,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
   <button id='fAll' class='on'>ALL</button>
   <button id='fDanger'>DANGER</button>
   <button id='fRestricted'>RESTRICTED</button>
+  <button id='fMilitary'>MILITARY</button>
   <input type='text' id='search' placeholder='FILTER NAME...'>
   <select id='dur'>
     <option value='0'>UNTIL DEACTIVATED</option>
@@ -156,6 +158,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
         if (a.Scheduled && !a.Manual) status += "<span class='pill sched'>SCHED</span>";
         if (a.Saved && !a.Default) status += "<span class='pill stage'>SAVED</span>";
       }
+      if (a.RaCategory) status += "<span class='pill " + a.RaCategory.toLowerCase() + "'>" + esc(a.RaCategory) + "</span>";
       var sched = a.Schedule ? esc(a.Schedule) : '';
       if (a.Windows.length){
         var wins = [];
@@ -176,7 +179,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
         : (a.Controller ? "<span class='user-lock'>USER LOCKED</span>" : actBtn + editBtn);
       html += "<div class='row'>"
         + "<span class='nm'>" + esc(a.Name) + "</span>"
-        + "<span class='type'>" + esc(a.Type.toUpperCase() === 'DANGER' ? 'DGR' : 'RST') + "</span>"
+        + "<span class='type'>" + esc(a.Type) + "</span>"
         + "<span class='lv'>" + lv(a.Floor) + '&ndash;' + lv(a.Ceiling) + "</span>"
         + "<span class='sched'>" + (sched || '&mdash;') + "</span>"
         + "<span class='status-pills'>" + status + "</span>"
@@ -340,7 +343,8 @@ button.danger-btn{border-color:#600000;color:#600000;}
       for (var i = 0; i < requests.length; i++){
         var q = requests[i];
         var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
-        html += "<div class='request-card'><div class='request-title'>" + esc(requestedNames.join(', ')) + "</div>"
+        var category = q.RaCategory || 'RA1';
+        html += "<div class='request-card'><div class='request-title'>" + esc(requestedNames.join(', ')) + " <span class='pill " + category.toLowerCase() + "'>" + esc(category) + "</span></div>"
           + "<div class='request-meta'>" + esc(showRequestTime(q.StartUtc)) + " &ndash; " + esc(showRequestTime(q.EndUtc)) + " &bull; REQUESTED BY " + esc(q.Requester) + "</div>"
           + (q.Notes ? "<div class='request-notes'>" + esc(q.Notes) + "</div>" : '')
           + "<div class='request-actions'><button onclick=\"reviewRequest('" + esc(q.Id) + "','accept')\">ACCEPT</button><button class='danger-btn' onclick=\"reviewRequest('" + esc(q.Id) + "','decline')\">DECLINE</button></div></div>";
@@ -359,7 +363,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 
   function setFilter(f, btn){
     filter = f;
-    ['fAll','fDanger','fRestricted'].forEach(function(id){ document.getElementById(id).className = ''; });
+    ['fAll','fDanger','fRestricted','fMilitary'].forEach(function(id){ document.getElementById(id).className = ''; });
     btn.className = 'on';
     render();
   }
@@ -367,6 +371,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
   document.getElementById('fAll').onclick = function(){ setFilter('ALL', this); };
   document.getElementById('fDanger').onclick = function(){ setFilter('DANGER', this); };
   document.getElementById('fRestricted').onclick = function(){ setFilter('RESTRICTED', this); };
+  document.getElementById('fMilitary').onclick = function(){ setFilter('MILITARY', this); };
   document.getElementById('search').oninput = function(){ search = this.value.trim().toUpperCase(); render(); };
   document.getElementById('deactAll').onclick = function(){
     editing = null; draft = null;

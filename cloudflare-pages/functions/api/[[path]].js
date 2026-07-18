@@ -31,6 +31,11 @@ function categoryLinePattern(category) {
   return category === "RA1" ? "Dashed" : (category === "RA2" ? "Dotted" : (category === "RA3" ? "Solid" : null));
 }
 
+function areaTypeFromName(name, fallback) {
+  const prefix = String(name || "").trim().charAt(0).toUpperCase();
+  return prefix === "D" ? "Danger" : (prefix === "R" ? "Restricted" : (prefix === "M" ? "Military" : fallback));
+}
+
 function requestedPath(context) {
   const path = context.params.path;
   return "/" + (Array.isArray(path) ? path.join("/") : String(path || ""));
@@ -236,7 +241,7 @@ async function areasResponse(env) {
     const defaultPreActive = !Boolean(row.manual) && dflt.preActive;
     return {
       Name: row.name,
-      Type: row.type,
+      Type: areaTypeFromName(row.name, row.type),
       Floor: staged?.Floor ?? row.floor,
       Ceiling: staged?.Ceiling ?? row.ceiling,
       Daiw: Boolean(row.daiw),

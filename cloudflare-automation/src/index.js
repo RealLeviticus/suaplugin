@@ -137,9 +137,11 @@ function parseDatasetAreas(xml) {
     const raCategory = linePattern.toLowerCase() === "dashed" ? "RA1"
       : (linePattern.toLowerCase() === "dotted" ? "RA2"
         : (linePattern.toLowerCase() === "solid" ? "RA3" : null));
+    const prefix = name.charAt(0).toUpperCase();
+    const areaType = prefix === "D" ? "Danger" : (prefix === "R" ? "Restricted" : (prefix === "M" ? "Military" : xmlAttr(attrs, "Type").trim()));
     areas.push({
       name,
-      type: xmlAttr(attrs, "Type").trim(),
+      type: areaType,
       floor: parseInt(xmlAttr(attrs, "AltitudeFloor"), 10) || 0,
       ceiling: parseInt(xmlAttr(attrs, "AltitudeCeiling"), 10) || 0,
       daiw: raCategory ? raCategory !== "RA1" : xmlAttr(attrs, "DAIWEnabled").toLowerCase() === "true",

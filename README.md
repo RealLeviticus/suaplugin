@@ -15,6 +15,7 @@ A vatSys plugin and public Cloudflare control page for staging and applying Aust
 - Plugin activations use vatSys's standard restricted-area colour with no plugin-added infill.
 - Each SUA border keeps the line pattern defined in the dataset, and controllers can change how an area is drawn from the vatSys Restricted Area window.
 - RA categories are derived from their line pattern everywhere: dashed is RA1 (green, DAIW off), dotted is RA2 (yellow, DAIW on), and solid is RA3 (red, DAIW on). Dataset areas expose their predefined category, while accepted requests and live vatSys activations apply and share the corresponding line pattern and DAIW setting.
+- Area type is derived from the designator prefix: `D` is Danger, `R` is Restricted, and `M` is Military. This rule is used by the catalogue, request form, control page, and generated map.
 - When a controller activates an area, their selected line pattern is shared to other connected controllers. A controller who did not activate the area can still restyle it locally without changing anyone else's display; the activating controller's pattern only reapplies if they change it again.
 - Dated UTC windows and temporary vertical-limit edits are supported. Original levels restore when an area is deactivated.
 - When one scheduled activation window ends, it is removed from the shared planned schedule while any later windows remain staged.

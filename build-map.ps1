@@ -71,11 +71,14 @@ foreach ($area in $doc.RestrictedAreas.Areas.RestrictedArea) {
     $floor = 0; [void][int]::TryParse([string]$area.AltitudeFloor, [ref]$floor)
     $ceiling = 0; [void][int]::TryParse([string]$area.AltitudeCeiling, [ref]$ceiling)
 
+    $prefix = $name.Substring(0, 1).ToUpperInvariant()
+    $areaType = if ($prefix -eq 'D') { 'Danger' } elseif ($prefix -eq 'R') { 'Restricted' } elseif ($prefix -eq 'M') { 'Military' } else { [string]$area.Type }
+
     $features.Add([ordered]@{
         type       = "Feature"
         properties = [ordered]@{
             name    = $name
-            type    = [string]$area.Type
+            type    = $areaType
             floor   = $floor
             ceiling = $ceiling
             # Dataset default draw style; the map falls back to this when an area

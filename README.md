@@ -120,7 +120,7 @@ The tracked example is [SuaAirspacePlugin.config.example.json](SuaAirspacePlugin
 
 ## VATPAC Docker/PostgreSQL Hosting
 
-A conventional container deployment is available in [vatpac-hosting](vatpac-hosting/README.md). It runs the same static site, API, plugin sync, VATSIM OAuth, Discord notifications, and scheduled refresh logic on Node.js with PostgreSQL. This is separate from, and does not replace, the current Cloudflare deployment.
+A conventional container deployment is available in [vatpac-hosting](vatpac-hosting/README.md). It runs the same static site, API, plugin sync, VATSIM OAuth, Discord notifications, and scheduled refresh logic on Node.js with PostgreSQL. Cloudflare is the temporary testing environment; Docker/PostgreSQL is the intended production destination and will replace the Cloudflare Pages, D1, and Worker services after acceptance testing and cutover.
 
 ## Project Structure
 

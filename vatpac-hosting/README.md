@@ -1,6 +1,8 @@
 # VATPAC Docker/PostgreSQL deployment
 
-This directory packages the SUA Airspace website, API, plugin sync endpoint, VATSIM OAuth flow, Discord request notifications, and scheduled area/NOTAM refresh for a conventional Docker and PostgreSQL host. It leaves the existing Cloudflare deployment unchanged and reuses the same application logic so both hosting targets behave consistently.
+This directory is the production migration target for the SUA Airspace website, API, plugin sync endpoint, VATSIM OAuth flow, Discord request notifications, and scheduled area/NOTAM refresh. Cloudflare is the temporary development and testing environment; after the Docker/PostgreSQL deployment passes acceptance testing and the plugin is repointed, the Cloudflare Pages, D1, and Worker resources can be retired.
+
+The container currently imports the proven application modules and static assets from the repository's `cloudflare-pages` and `cloudflare-automation` directories. Those are source-code locations only: the running container has no Cloudflare service, account, D1, Pages, Worker, or Wrangler dependency.
 
 ## Services
 
@@ -81,9 +83,18 @@ https://sua.example.vatpac.org/api/auth/callback
 
 Set the client ID, client secret, redirect URI, and controller CID allow-list first. Switch `VATSIM_AUTH_REQUIRED` to `true` only after login and callback behavior have been tested on the final HTTPS hostname.
 
-## Existing Cloudflare data
+## Production cutover from Cloudflare
 
-The PostgreSQL schema starts empty. The scheduled refresh populates the area catalogue and current NOTAM state automatically, but activation requests and manually staged state are not copied from D1. A one-time data export/import should be planned immediately before production cutover if that history must be retained.
+The PostgreSQL schema starts empty. The scheduled refresh populates the area catalogue and current NOTAM state automatically, but activation requests and manually staged state are not copied from D1. A one-time D1-to-PostgreSQL export/import should be planned immediately before production cutover if that history must be retained.
+
+Recommended cutover order:
+
+1. Deploy the container and PostgreSQL database on a temporary VATPAC hostname.
+2. Verify requests, controller review, VATSIM authorization, Discord delivery, scheduled refresh, and live plugin synchronization.
+3. Pause request submissions briefly and migrate any D1 data that must be retained.
+4. Move the production hostname to the container and update `PublicUiUrl` and `CloudApiUrl` in the plugin configuration.
+5. Confirm connected plugins are reading and writing PostgreSQL-backed state.
+6. Retire Cloudflare Pages, D1, the scheduled Worker, their secrets, and related DNS only after the new service is confirmed stable.
 
 ## Handoff checks
 

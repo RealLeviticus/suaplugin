@@ -355,6 +355,7 @@ async function areasResponse(env) {
       Ceiling: staged?.Ceiling ?? row.ceiling,
       Daiw: Boolean(row.daiw),
       Schedule: staged?.H24 ? "H24" : (staged?.SolarModes?.join("+") || row.schedule || ""),
+      SolarMode: staged?.SolarModes?.length === 1 ? staged.SolarModes[0] : null,
       Active: timing.active || defaultActive,
       PreActive: timing.preActive || defaultPreActive,
       Hidden: Boolean(row.hidden),

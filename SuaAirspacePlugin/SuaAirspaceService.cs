@@ -36,6 +36,8 @@ public sealed class SuaAirspaceService : IDisposable
         public bool? OriginalDaiw;
         public DisplayMaps.Map.Patterns? OriginalLinePattern;
         public DisplayMaps.Map.InfillTypes? OriginalInfillType;
+        public DisplayMaps.Map.Patterns? DesiredLinePattern;
+        public bool? DesiredDaiw;
         public int? OriginalFloor;
         public int? OriginalCeiling;
         public int? AppliedFloor;
@@ -257,10 +259,9 @@ public sealed class SuaAirspaceService : IDisposable
     }
 
     /// <summary>
-    /// Apply the line pattern an activating controller shared for an area. This
-    /// is a purely local display change (never re-uploaded by this installation)
-    /// so a controller who did not activate the area can still restyle it in
-    /// their own Restricted Area window without the change leaving this client.
+    /// Stage the requested category with its activation. Future windows retain
+    /// the current local/dataset category until activation starts; active windows
+    /// apply the requested pattern and DAIW setting until they end.
     /// </summary>
     internal bool TrySetLinePattern(string name, string? pattern)
     {
@@ -301,16 +302,9 @@ public sealed class SuaAirspaceService : IDisposable
         lock (_lock)
         {
             var state = GetOrCreateState(area.Name);
-            if (area.LinePattern != pattern)
-            {
-                state.OriginalLinePattern ??= area.LinePattern;
-                area.LinePattern = pattern;
-            }
-            if (area.DAIWEnabled != desiredDaiw)
-            {
-                state.OriginalDaiw ??= area.DAIWEnabled;
-                area.DAIWEnabled = desiredDaiw;
-            }
+            state.DesiredLinePattern = pattern;
+            state.DesiredDaiw = desiredDaiw;
+            if (state.Injected is not null) ApplyScheduledCategory(area, state);
         }
         RequestNativeMapRefresh();
         return true;
@@ -687,6 +681,7 @@ public sealed class SuaAirspaceService : IDisposable
 
     private void Inject(RestrictedAreas.RestrictedArea area, ManualState state)
     {
+        ApplyScheduledCategory(area, state);
         if (area.InfillType != DisplayMaps.Map.InfillTypes.None)
         {
             state.OriginalInfillType ??= area.InfillType;
@@ -697,6 +692,20 @@ public sealed class SuaAirspaceService : IDisposable
         SwapActivations(area, current => current.Add(activation));
         state.Injected = activation;
 
+    }
+
+    private static void ApplyScheduledCategory(RestrictedAreas.RestrictedArea area, ManualState state)
+    {
+        if (state.DesiredLinePattern.HasValue && area.LinePattern != state.DesiredLinePattern.Value)
+        {
+            state.OriginalLinePattern ??= area.LinePattern;
+            area.LinePattern = state.DesiredLinePattern.Value;
+        }
+        if (state.DesiredDaiw.HasValue && area.DAIWEnabled != state.DesiredDaiw.Value)
+        {
+            state.OriginalDaiw ??= area.DAIWEnabled;
+            area.DAIWEnabled = state.DesiredDaiw.Value;
+        }
     }
 
     private void RemoveInjection(RestrictedAreas.RestrictedArea area, ManualState state)

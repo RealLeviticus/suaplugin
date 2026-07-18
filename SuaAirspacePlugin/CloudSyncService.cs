@@ -178,9 +178,9 @@ public sealed class CloudSyncService : IDisposable
 
             if (!applied) continue;
 
-            // Applying the owner's draw style only when the fingerprint changes
-            // means a local restyle by a non-activating controller survives every
-            // subsequent sync until the activating controller changes it again.
+            // Stage the category with the activation. SuaAirspaceService applies
+            // it only while the H24/window activation is active and restores the
+            // local/dataset style when that activation ends.
             _sua.TryApplyRaCategory(item.Name, item.RaCategory, item.LinePattern);
 
             _managedNames.Add(item.Name);

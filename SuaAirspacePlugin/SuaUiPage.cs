@@ -173,7 +173,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
         ? ""<span class='pill "" + a.RaCategory.toLowerCase() + ""'>"" + esc(a.RaCategory) + ""</span>""
         : '&mdash;';
       var sched = a.Schedule ? esc(a.Schedule) : '';
-      if (a.Windows.length){
+      if (a.Windows.length && !a.SolarMode){
         var wins = [];
         for (var k = 0; k < a.Windows.length && k < 3; k++){
           var pr = a.Windows[k].split('-');
@@ -214,15 +214,20 @@ button.danger-btn{border-color:#600000;color:#600000;}
        + ""<button onclick='saveLevels()'>SET LEVELS</button></div>"";
     h += ""<h3>RA CATEGORY</h3><div class='lv-row'><select id='edCategory'><option"" + (draft.category === 'RA1' ? ' selected' : '') + "">RA1</option><option"" + (draft.category === 'RA2' ? ' selected' : '') + "">RA2</option><option"" + (draft.category === 'RA3' ? ' selected' : '') + "">RA3</option></select><button onclick='saveCategory()'>SET CATEGORY</button></div>"";
     h += ""<h3>ACTIVE TIMES (UTC)</h3>"";
-    for (var i = 0; i < draft.windows.length; i++){
-      h += ""<div class='win-row'><label>FROM</label><input type='datetime-local' data-wi='"" + i + ""' data-side='f' value='"" + draft.windows[i].f + ""' onchange='winEdit(this)'>""
-         + ""<label>TO</label><input type='datetime-local' data-wi='"" + i + ""' data-side='t' value='"" + draft.windows[i].t + ""' onchange='winEdit(this)'>""
-         + ""<button onclick='winDel("" + i + "")'>X</button></div>"";
+    h += ""<div class='win-row'><label>MODE</label><select id='edTimeMode' onchange='timeModeChanged(this)'><option value='WINDOWS'"" + (draft.timeMode === 'WINDOWS' ? ' selected' : '') + "">DATED UTC WINDOWS</option><option value='HJ'"" + (draft.timeMode === 'HJ' ? ' selected' : '') + "">HJ · SUNRISE TO SUNSET</option><option value='HN'"" + (draft.timeMode === 'HN' ? ' selected' : '') + "">HN · SUNSET TO SUNRISE</option></select></div>"";
+    if (draft.timeMode === 'WINDOWS'){
+      for (var i = 0; i < draft.windows.length; i++){
+        h += ""<div class='win-row'><label>FROM</label><input type='datetime-local' data-wi='"" + i + ""' data-side='f' value='"" + draft.windows[i].f + ""' onchange='winEdit(this)'>""
+           + ""<label>TO</label><input type='datetime-local' data-wi='"" + i + ""' data-side='t' value='"" + draft.windows[i].t + ""' onchange='winEdit(this)'>""
+           + ""<button onclick='winDel("" + i + "")'>X</button></div>"";
+      }
     }
-    h += ""<div class='win-row'><button onclick='winAdd()'>+ ADD TIME</button><button onclick='saveWindows()'>SAVE TIMES</button>"";
+    h += ""<div class='win-row'>"";
+    if (draft.timeMode === 'WINDOWS') h += ""<button onclick='winAdd()'>+ ADD TIME</button>"";
+    h += ""<button onclick='saveWindows()'>SAVE ACTIVATION TIME</button>"";
     if (a.Staged) h += ""<button class='danger-btn' onclick=\""act('deactivate','"" + encodeURIComponent(a.Name) + ""')\"">CLEAR SAVED</button>"";
     h += ""</div>"";
-    h += ""<div class='hint'>Times and levels are saved to the shared cloud activation for this area.</div>"";
+    h += ""<div class='hint'>HJ uses sunrise to sunset and HN uses sunset to the next sunrise at this airspace. Times and levels are saved to the shared activation.</div>"";
     h += ""</div>"";
     return h;
   }
@@ -234,7 +239,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
     for (var i = 0; i < areas.length; i++) if (areas[i].Name === name) a = areas[i];
     if (!a) return;
     editing = name;
-    draft = { floor: a.Floor, ceiling: a.Ceiling, category: a.RaCategory || 'RA1', windows: [] };
+    draft = { floor: a.Floor, ceiling: a.Ceiling, category: a.RaCategory || 'RA1', timeMode: a.SolarMode || 'WINDOWS', windows: [] };
     for (var k = 0; k < a.Windows.length; k++){
       var pr = a.Windows[k].split('-');
       draft.windows.push({ f: wireToInput(pr[0]), t: wireToInput(pr[1]) });
@@ -246,6 +251,12 @@ button.danger-btn{border-color:#600000;color:#600000;}
     var i = parseInt(inp.getAttribute('data-wi'), 10);
     if (!draft.windows[i]) return;
     draft.windows[i][inp.getAttribute('data-side')] = inp.value;
+  };
+
+  window.timeModeChanged = function(sel){
+    syncLevelDraft();
+    draft.timeMode = sel.value;
+    render();
   };
 
   window.winAdd = function(){
@@ -286,6 +297,10 @@ button.danger-btn{border-color:#600000;color:#600000;}
 
   window.saveWindows = function(){
     syncLevelDraft();
+    if (draft.timeMode === 'HJ' || draft.timeMode === 'HN'){
+      post('/api/sua/activate?name=' + encodeURIComponent(editing) + '&mode=' + draft.timeMode);
+      return;
+    }
     var parts = [];
     for (var i = 0; i < draft.windows.length; i++){
       var f = inputToWire(draft.windows[i].f);

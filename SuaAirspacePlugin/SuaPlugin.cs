@@ -8,11 +8,7 @@ namespace SuaAirspacePlugin;
 [Export(typeof(IPlugin))]
 public sealed class SuaPlugin : IPlugin, IDisposable
 {
-    private const int WebPort = 5300;
-
     private readonly SuaAirspaceService _sua;
-    private readonly SuaNotamService _notam;
-    private readonly EmbeddedWebServer _server;
     private readonly CloudSyncService _sync;
 
     private bool _disposed;
@@ -21,13 +17,10 @@ public sealed class SuaPlugin : IPlugin, IDisposable
     {
         var config = PluginConfig.LoadOrCreate();
         _sua = new SuaAirspaceService();
-        _notam = new SuaNotamService(_sua);
-        _server = new EmbeddedWebServer(_sua, _notam, config, WebPort);
         _sync = new CloudSyncService(_sua, config);
 
         try
         {
-            _server.Start();
             _sync.Start();
         }
         catch (Exception ex)
@@ -48,7 +41,6 @@ public sealed class SuaPlugin : IPlugin, IDisposable
         _disposed = true;
 
         _sync.Dispose();
-        _server.Dispose();
         _sua.Dispose();
     }
 

@@ -9,7 +9,6 @@ public sealed class PluginConfig
 {
     private const string FileName = "SuaAirspacePlugin.config.json";
 
-    public string PublicUiUrl { get; set; } = "https://sua.actuallyleviticus.xyz/";
     public string CloudApiUrl { get; set; } = "https://sua-airspace.pages.dev/";
     public int SyncIntervalSeconds { get; set; } = 5;
     public string InstallationId { get; set; } = "";

@@ -38,7 +38,7 @@ Open `https://sua.actuallyleviticus.xyz/`.
 - The NOTAM panel is informational and refreshed automatically. Every matched airspace NOTAM is scheduled from its listed times by the scheduled Worker and re-staged on each run, so it stays scheduled for its whole life. There are no manual activate/deactivate controls — matched areas activate and deactivate automatically as each NOTAM window opens and closes.
 - `CLEAR SHARED ACTIVATIONS` clears shared website/manual activations. It never changes default activations, and it no longer pauses NOTAMs — airspace NOTAMs always remain auto-scheduled and re-stage on the next automation run.
 
-The local `http://localhost:5300/` endpoint is loopback-only and redirects to the public page. Plugin synchronisation uses the public Cloudflare API and requires no operator or machine key, so the same release can be copied directly to other controllers.
+Plugin synchronisation uses the public Cloudflare API and requires no operator or machine key, so the same release can be copied directly to other controllers. The plugin runs no local web server; the website is the only UI.
 
 ## Architecture
 
@@ -102,7 +102,6 @@ Apply D1 migrations and deploy both Cloudflare projects:
 ```powershell
 $env:CLOUDFLARE_ACCOUNT_ID = "<account-id>"
 wrangler d1 migrations apply sua-airspace --remote --config .\cloudflare-pages\wrangler.toml
-.\build-pages.ps1
 .\build-map.ps1
 Push-Location .\cloudflare-pages
 wrangler pages deploy .\public --project-name sua-airspace --branch main
@@ -134,8 +133,6 @@ cloudflare-pages/public/areas.geojson  generated area geometry (build-map.ps1)
 cloudflare-automation/            scheduled VATPAC NOTAM Worker
 SuaAirspacePlugin/CloudSyncService.cs
 SuaAirspacePlugin/SuaAirspaceService.cs
-SuaAirspacePlugin/SuaUiPage.cs
-build-pages.ps1
 build-map.ps1
 build-release.ps1
 ```

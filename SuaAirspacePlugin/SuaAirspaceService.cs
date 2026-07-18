@@ -130,12 +130,10 @@ public sealed class SuaAirspaceService : IDisposable
 
     internal bool SyncReady => IsConnected && AreasLoaded;
 
-    public object GetAreas() => CreateSnapshot(null, 0);
-
     internal object GetCloudSnapshot(string installationId, int userLeaseSeconds) =>
         CreateSnapshot(installationId, userLeaseSeconds);
 
-    private object CreateSnapshot(string? installationId, int userLeaseSeconds)
+    private object CreateSnapshot(string installationId, int userLeaseSeconds)
     {
         var instance = RestrictedAreas.Instance;
         var controllerCid = GetControllerCid();
@@ -143,8 +141,6 @@ public sealed class SuaAirspaceService : IDisposable
         var controllerFacility = GetControllerFacility();
         if (!IsConnected || instance is null || instance.Areas.Count == 0)
         {
-            if (installationId is null)
-                return new { Loaded = false, Areas = new List<object>(), UtcTime = UtcNowString() };
             return new
             {
                 Loaded = false,
@@ -185,9 +181,6 @@ public sealed class SuaAirspaceService : IDisposable
                 })
                 .ToList();
 
-            if (installationId is null)
-                return new { Loaded = true, Areas = areas, UtcTime = UtcNowString() };
-
             return new
             {
                 Loaded = true,
@@ -206,16 +199,10 @@ public sealed class SuaAirspaceService : IDisposable
     }
 
     /// <summary>minutes &lt;= 0: active until deactivated; otherwise a window from now.</summary>
-    public object Activate(string name, int minutes)
+    internal bool TryActivate(string name, int minutes)
     {
-        if (!CanActivateRestrictedAreas) return ActivationPermissionFailure();
-        return ActivateCore(name, minutes);
-    }
-
-    private object ActivateCore(string name, int minutes)
-    {
-        var area = FindArea(name, out var error);
-        if (area is null) return Failure(error);
+        var area = FindArea(name);
+        if (area is null) return false;
 
         lock (_lock)
         {
@@ -234,27 +221,6 @@ public sealed class SuaAirspaceService : IDisposable
         }
 
         Tick();
-        return Success(area);
-    }
-
-    internal bool TryActivate(string name, int minutes)
-    {
-        if (FindArea(name, out _) is null) return false;
-        ActivateCore(name, minutes);
-        return true;
-    }
-
-    internal bool TrySetWindows(string name, string spec)
-    {
-        if (FindArea(name, out _) is null) return false;
-        SetWindowsCore(name, spec);
-        return true;
-    }
-
-    internal bool TrySetLevels(string name, int? floor, int? ceiling)
-    {
-        if (FindArea(name, out _) is null) return false;
-        SetLevelsCore(name, floor, ceiling);
         return true;
     }
 
@@ -263,24 +229,9 @@ public sealed class SuaAirspaceService : IDisposable
     /// the current local/dataset category until activation starts; active windows
     /// apply the requested pattern and DAIW setting until they end.
     /// </summary>
-    internal bool TrySetLinePattern(string name, string? pattern)
-    {
-        if (string.IsNullOrWhiteSpace(pattern)) return false;
-        if (!Enum.TryParse<DisplayMaps.Map.Patterns>(pattern, ignoreCase: true, out var parsed))
-            return false;
-
-        var area = FindArea(name, out _);
-        if (area is null) return false;
-        if (area.LinePattern == parsed) return true;
-
-        area.LinePattern = parsed;
-        RequestNativeMapRefresh();
-        return true;
-    }
-
     internal bool TryApplyRaCategory(string name, string? category, string? fallbackPattern)
     {
-        var area = FindArea(name, out _);
+        var area = FindArea(name);
         if (area is null) return false;
 
         DisplayMaps.Map.Patterns pattern;
@@ -314,49 +265,11 @@ public sealed class SuaAirspaceService : IDisposable
         return true;
     }
 
-    internal bool TryActivateWindows(string name, List<(DateTime FromUtc, DateTime ToUtc)> windows)
-    {
-        var area = FindArea(name, out _);
-        if (area is null) return false;
-
-        var now = DateTime.UtcNow;
-        var valid = windows
-            .Where(w => w.ToUtc > w.FromUtc && w.ToUtc > now)
-            .Select(w => new Window { FromUtc = w.FromUtc, ToUtc = w.ToUtc })
-            .ToList();
-
-        lock (_lock)
-        {
-            var state = GetOrCreateState(area.Name);
-            if (valid.Count == 0)
-            {
-                // No usable timing in the NOTAM — fall back to H24.
-                state.H24 = true;
-                state.Windows.Clear();
-            }
-            else
-            {
-                state.H24 = false;
-                state.Windows.Clear();
-                state.Windows.AddRange(valid);
-            }
-        }
-
-        Tick();
-        return true;
-    }
-
     /// <summary>Replace an area's activation windows. Spec: "yyyyMMddHHmm-yyyyMMddHHmm,..."; empty clears scheduling.</summary>
-    public object SetWindows(string name, string spec)
+    internal bool TrySetWindows(string name, string spec)
     {
-        if (!CanActivateRestrictedAreas) return ActivationPermissionFailure();
-        return SetWindowsCore(name, spec);
-    }
-
-    private object SetWindowsCore(string name, string spec)
-    {
-        var area = FindArea(name, out var error);
-        if (area is null) return Failure(error);
+        var area = FindArea(name);
+        if (area is null) return false;
 
         var windows = new List<Window>();
         foreach (var part in (spec ?? "").Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
@@ -365,8 +278,8 @@ public sealed class SuaAirspaceService : IDisposable
             if (ends.Length != 2 ||
                 !TryParseWindowTime(ends[0], out var from) ||
                 !TryParseWindowTime(ends[1], out var to))
-                return Failure("Invalid window: " + part + " (expected yyyyMMddHHmm-yyyyMMddHHmm)");
-            if (to <= from) return Failure("Window ends before it starts: " + part);
+                return false;
+            if (to <= from) return false;
             windows.Add(new Window { FromUtc = from, ToUtc = to });
         }
 
@@ -379,23 +292,17 @@ public sealed class SuaAirspaceService : IDisposable
         }
 
         Tick();
-        return Success(area);
+        return true;
     }
 
     /// <summary>Edit an area's vertical limits (feet). Originals restore on deactivation.</summary>
-    public object SetLevels(string name, int? floor, int? ceiling)
+    internal bool TrySetLevels(string name, int? floor, int? ceiling)
     {
-        if (!CanActivateRestrictedAreas) return ActivationPermissionFailure();
-        return SetLevelsCore(name, floor, ceiling);
-    }
-
-    private object SetLevelsCore(string name, int? floor, int? ceiling)
-    {
-        var area = FindArea(name, out var error);
-        if (area is null) return Failure(error);
-        if (floor is null && ceiling is null) return Failure("floor or ceiling required.");
+        var area = FindArea(name);
+        if (area is null) return false;
+        if (floor is null && ceiling is null) return false;
         if (floor is not null && ceiling is not null && ceiling < floor)
-            return Failure("Ceiling is below floor.");
+            return false;
 
         lock (_lock)
         {
@@ -421,13 +328,13 @@ public sealed class SuaAirspaceService : IDisposable
         }
 
         Tick();
-        return Success(area);
+        return true;
     }
 
-    public object Deactivate(string name)
+    internal void Deactivate(string name)
     {
-        var area = FindArea(name, out var error);
-        if (area is null) return Failure(error);
+        var area = FindArea(name);
+        if (area is null) return;
 
         var displayChanged = false;
         lock (_lock)
@@ -442,30 +349,6 @@ public sealed class SuaAirspaceService : IDisposable
 
         Tick();
         if (displayChanged) RequestNativeMapRefresh();
-        return Success(area);
-    }
-
-    public object DeactivateAll()
-    {
-        var instance = RestrictedAreas.Instance;
-        if (instance is null) return Failure("Restricted areas are not loaded yet.");
-
-        var displayChanged = false;
-        lock (_lock)
-        {
-            foreach (var area in instance.Areas)
-            {
-                if (string.IsNullOrWhiteSpace(area.Name)) continue;
-                if (!_states.TryGetValue(area.Name, out var state)) continue;
-                displayChanged |= state.Injected is not null || state.OriginalInfillType.HasValue || state.HasLevelEdits;
-                ReleaseState(area, state);
-                if (CanDiscardState(state)) _states.Remove(area.Name);
-            }
-        }
-
-        Tick();
-        if (displayChanged) RequestNativeMapRefresh();
-        return new { Success = true };
     }
 
     /// <summary>
@@ -1040,27 +923,14 @@ public sealed class SuaAirspaceService : IDisposable
         area.Activations = updated;
     }
 
-    private RestrictedAreas.RestrictedArea? FindArea(string? name, out string error)
+    private static RestrictedAreas.RestrictedArea? FindArea(string? name)
     {
-        error = "";
         var instance = RestrictedAreas.Instance;
-        if (instance is null)
-        {
-            error = "Restricted areas are not loaded yet.";
-            return null;
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            error = "Area name required.";
-            return null;
-        }
+        if (instance is null || string.IsNullOrWhiteSpace(name)) return null;
 
         var target = name!.Trim();
-        var area = instance.Areas.FirstOrDefault(a =>
+        return instance.Areas.FirstOrDefault(a =>
             string.Equals(a.Name, target, StringComparison.OrdinalIgnoreCase));
-        if (area is null) error = "Unknown area: " + target;
-        return area;
     }
 
     private static string DescribeSchedule(RestrictedAreas.RestrictedArea area, ManualState? state)
@@ -1078,30 +948,6 @@ public sealed class SuaAirspaceService : IDisposable
     private static bool TryParseWindowTime(string value, out DateTime utc) =>
         DateTime.TryParseExact(value.Trim(), WindowFormat, CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out utc);
-
-    private static string FormatWindow(Window w) =>
-        w.FromUtc.ToString(WindowFormat, CultureInfo.InvariantCulture) + "-" +
-        w.ToUtc.ToString(WindowFormat, CultureInfo.InvariantCulture);
-
-    private object Success(RestrictedAreas.RestrictedArea area)
-    {
-        lock (_lock)
-        {
-            _states.TryGetValue(area.Name, out var state);
-            return new
-            {
-                Success = true,
-                area.Name,
-                Active = area.IsActive(),
-                Manual = state?.Injected is not null,
-            };
-        }
-    }
-
-    private static object Failure(string error) => new { Success = false, Error = error };
-
-    private static object ActivationPermissionFailure() =>
-        Failure("Connect to VATSIM in a controller position (not OBS) to activate Restricted Areas.");
 
     private static string UtcNowString() =>
         DateTime.UtcNow.ToString("HHmm'Z'", CultureInfo.InvariantCulture);

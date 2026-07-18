@@ -70,7 +70,6 @@ Point installed plugins at the new public origin. The current plugin sync endpoi
 
 ```json
 {
-  "PublicUiUrl": "https://sua.example.vatpac.org/",
   "CloudApiUrl": "https://sua.example.vatpac.org/",
   "SyncIntervalSeconds": 5
 }
@@ -95,7 +94,7 @@ Recommended cutover order:
 1. Deploy the container and PostgreSQL database on a temporary VATPAC hostname.
 2. Verify requests, controller review, VATSIM authorization, Discord delivery, scheduled refresh, and live plugin synchronization.
 3. Pause request submissions briefly and migrate any D1 data that must be retained.
-4. Move the production hostname to the container and update `PublicUiUrl` and `CloudApiUrl` in the plugin configuration.
+4. Move the production hostname to the container and update `CloudApiUrl` in the plugin configuration.
 5. Confirm connected plugins are reading and writing PostgreSQL-backed state.
 6. Retire Cloudflare Pages, D1, the scheduled Worker, their secrets, and related DNS only after the new service is confirmed stable.
 

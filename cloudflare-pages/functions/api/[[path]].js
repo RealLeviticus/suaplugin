@@ -339,6 +339,80 @@ async function setLevels(request, env) {
   return json({ Success: true, Name: name, Staged: true });
 }
 
+async function createActivationRequest(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
+  const areaName = String(body?.AreaName || "").trim();
+  const requester = String(body?.Requester || "").trim().slice(0, 80);
+  const notes = String(body?.Notes || "").trim().slice(0, 500);
+  const start = new Date(String(body?.StartUtc || ""));
+  const end = new Date(String(body?.EndUtc || ""));
+  if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
+  if (!requester) return json({ Success: false, Error: "Your name or callsign is required." }, 400);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
+    return json({ Success: false, Error: "Valid start and end times are required." }, 400);
+  if (end <= start) return json({ Success: false, Error: "The end time must be after the start time." }, 400);
+  if (end <= new Date()) return json({ Success: false, Error: "The requested time has already ended." }, 400);
+  if (end.getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000)
+    return json({ Success: false, Error: "A request cannot be longer than seven days." }, 400);
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO activation_requests
+       (id, area_name, requester, start_utc, end_utc, notes, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
+  ).bind(id, areaName, requester, start.toISOString(), end.toISOString(), notes, now).run();
+  return json({ Success: true, Id: id });
+}
+
+async function activationRequestsResponse(env) {
+  const result = await env.DB.prepare(
+    `SELECT id, area_name, requester, start_utc, end_utc, notes, status, created_at, reviewed_at
+       FROM activation_requests
+      WHERE status = 'pending'
+      ORDER BY start_utc, created_at`
+  ).all();
+  return json({ Success: true, Requests: (result.results || []).map((row) => ({
+    Id: row.id, AreaName: row.area_name, Requester: row.requester,
+    StartUtc: row.start_utc, EndUtc: row.end_utc, Notes: row.notes,
+    Status: row.status, CreatedAt: row.created_at, ReviewedAt: row.reviewed_at,
+  })) });
+}
+
+async function reviewActivationRequest(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
+  const id = String(body?.Id || "").trim();
+  const decision = String(body?.Decision || "").trim().toLowerCase();
+  if (decision !== "accept" && decision !== "decline")
+    return json({ Success: false, Error: "Decision must be accept or decline." }, 400);
+  const row = await env.DB.prepare(
+    "SELECT * FROM activation_requests WHERE id = ? AND status = 'pending'"
+  ).bind(id).first();
+  if (!row) return json({ Success: false, Error: "This request is no longer pending." }, 409);
+
+  const now = new Date().toISOString();
+  const statements = [];
+  if (decision === "accept") {
+    const start = new Date(row.start_utc);
+    const end = new Date(row.end_utc);
+    if (end <= new Date()) return json({ Success: false, Error: "This request has already expired." }, 409);
+    statements.push(env.DB.prepare(
+      `INSERT INTO desired_activations
+         (name, source_type, source_id, h24, windows, expires_at, created_at, updated_at)
+       VALUES (?, 'request', ?, 0, ?, ?, ?, ?)
+       ON CONFLICT(name, source_type, source_id) DO UPDATE SET
+         windows=excluded.windows, expires_at=excluded.expires_at, updated_at=excluded.updated_at`
+    ).bind(row.area_name, row.id, JSON.stringify([`${wireDate(start)}-${wireDate(end)}`]), end.toISOString(), now, now));
+  }
+  statements.push(env.DB.prepare(
+    "UPDATE activation_requests SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'"
+  ).bind(decision === "accept" ? "accepted" : "declined", now, id));
+  await env.DB.batch(statements);
+  return json({ Success: true, Id: id, Status: decision === "accept" ? "accepted" : "declined" });
+}
+
 async function notamsResponse(env) {
   const now = new Date().toISOString();
   const result = await env.DB.prepare(
@@ -456,9 +530,12 @@ export async function onRequest(context) {
   try {
     if (path === "/sua/areas" && method === "GET") return areasResponse(context.env);
     if (path === "/sua/notams" && method === "GET") return notamsResponse(context.env);
+    if (path === "/sua/requests" && method === "GET") return activationRequestsResponse(context.env);
     if (path === "/plugin/sync" && method === "POST") return pluginSync(context.request, context.env);
 
     if (method !== "POST") return json({ Error: "Not found." }, 404);
+    if (path === "/sua/requests") return createActivationRequest(context.request, context.env);
+    if (path === "/sua/requests/review") return reviewActivationRequest(context.request, context.env);
     if (path === "/sua/activate") return activateArea(context.request, context.env);
     if (path === "/sua/deactivate") {
       const name = (new URL(context.request.url).searchParams.get("name") || "").trim();

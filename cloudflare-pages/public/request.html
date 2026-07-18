@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Request Airspace Activation</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b1420;color:#eaf2f7;font-family:Arial,sans-serif;min-height:100vh}.shell{max-width:760px;margin:auto;padding:48px 20px}.eyebrow{color:#68d5c5;font-weight:700;letter-spacing:.14em;font-size:12px}.hero h1{font-size:clamp(32px,7vw,58px);line-height:1;margin:12px 0 16px}.hero p{color:#adc0ce;font-size:17px;line-height:1.6;max-width:620px}.card{margin-top:34px;padding:28px;background:#142332;border:1px solid #294052;border-radius:14px;box-shadow:0 18px 50px #0005}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.full{grid-column:1/-1}label{display:block;color:#b9c9d4;font-size:13px;font-weight:700;margin-bottom:7px}input,select,textarea,button{width:100%;font:inherit;border-radius:7px}input,select,textarea{background:#0d1924;color:#fff;border:1px solid #3a5265;padding:12px}textarea{resize:vertical;min-height:92px}button{border:0;background:#68d5c5;color:#071510;font-weight:800;padding:14px;cursor:pointer}button:disabled{opacity:.55;cursor:wait}.msg{min-height:24px;margin-top:16px;color:#ff9a91}.msg.ok{color:#82e8b8}.utc{color:#8299aa;font-size:12px;margin-top:7px}.links{margin-top:24px;display:flex;gap:18px}.links a{color:#9eb6c6;text-decoration:none;font-size:13px}.links a:hover{color:#68d5c5}@media(max-width:620px){.shell{padding-top:28px}.card{padding:20px}.grid{grid-template-columns:1fr}.full{grid-column:auto}}
+</style>
+</head>
+<body><main class="shell">
+<section class="hero"><div class="eyebrow">AUSTRALIAN SPECIAL USE AIRSPACE</div><h1>Request an activation</h1><p>Choose the airspace and the UTC period you need. Your request will be sent to the controlling team for review; submitting it does not activate the airspace.</p></section>
+<form class="card" id="form"><div class="grid">
+<div class="full"><label for="area">AIRSPACE</label><select id="area" required><option value="">Loading airspace…</option></select></div>
+<div><label for="start">START (YOUR LOCAL TIME)</label><input id="start" type="datetime-local" required><div class="utc" id="startUtc"></div></div>
+<div><label for="end">END (YOUR LOCAL TIME)</label><input id="end" type="datetime-local" required><div class="utc" id="endUtc"></div></div>
+<div class="full"><label for="requester">YOUR NAME OR CALLSIGN</label><input id="requester" maxlength="80" autocomplete="name" required placeholder="Who is making this request?"></div>
+<div class="full"><label for="notes">NOTES (OPTIONAL)</label><textarea id="notes" maxlength="500" placeholder="Operation details or anything the controller should know"></textarea></div>
+<div class="full"><button id="submit" type="submit">SEND ACTIVATION REQUEST</button><div class="msg" id="msg" role="status"></div></div>
+</div></form>
+<div class="links"><a href="/map">View airspace map</a></div>
+</main><script>
+(function(){
+var form=document.getElementById('form'),msg=document.getElementById('msg'),button=document.getElementById('submit');
+function localValue(d){var p=function(n){return String(n).padStart(2,'0')};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())}
+function updateUtc(id,out){var v=document.getElementById(id).value;document.getElementById(out).textContent=v?new Date(v).toISOString().slice(0,16).replace('T',' ')+'Z':''}
+var now=new Date(),end=new Date(now.getTime()+60*60*1000);now.setMinutes(Math.ceil(now.getMinutes()/5)*5,0,0);end.setMinutes(Math.ceil(end.getMinutes()/5)*5,0,0);document.getElementById('start').value=localValue(now);document.getElementById('end').value=localValue(end);updateUtc('start','startUtc');updateUtc('end','endUtc');
+document.getElementById('start').onchange=function(){updateUtc('start','startUtc')};document.getElementById('end').onchange=function(){updateUtc('end','endUtc')};
+fetch('/api/sua/areas').then(function(r){return r.json()}).then(function(d){var s=document.getElementById('area');s.innerHTML='<option value="">Select airspace…</option>';(d.Areas||[]).forEach(function(a){var o=document.createElement('option');o.value=a.Name;o.textContent=a.Name+' — '+a.Type;s.appendChild(o)})}).catch(function(){msg.textContent='The airspace list is temporarily unavailable.'});
+form.onsubmit=function(e){e.preventDefault();button.disabled=true;msg.className='msg';msg.textContent='Sending…';fetch('/api/sua/requests',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({AreaName:document.getElementById('area').value,StartUtc:new Date(document.getElementById('start').value).toISOString(),EndUtc:new Date(document.getElementById('end').value).toISOString(),Requester:document.getElementById('requester').value,Notes:document.getElementById('notes').value})}).then(function(r){return r.json()}).then(function(d){if(!d.Success)throw new Error(d.Error||'Request failed.');msg.className='msg ok';msg.textContent='Request sent. The controlling team will review it.';form.reset()}).catch(function(e){msg.textContent=e.message||'Request failed.'}).finally(function(){button.disabled=false})};
+})();
+</script></body></html>

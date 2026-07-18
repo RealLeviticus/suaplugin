@@ -5,6 +5,7 @@ A vatSys plugin and public Cloudflare control page for staging and applying Aust
 ## Features
 
 - Public control page at `https://sua.actuallyleviticus.xyz/`; no browser operator key is required.
+- Public activation request form at `https://sua.actuallyleviticus.xyz/request`. A request records the selected area, UTC start/end, requester, and optional notes without activating airspace. Controllers review pending requests from the `REQUESTS` button on the control page and can accept or decline each one; acceptance stages the requested window in shared desired state.
 - Full-screen airspace map at `https://sua.actuallyleviticus.xyz/map` plots every Danger/Restricted area over Australia and highlights it live (Danger yellow, Restricted/M red; filled = active, faint = pre-active, outline = deactive), refreshing every five seconds. Each border matches the area's activation draw style. Geometry is a static `areas.geojson` asset generated from the canonical GitHub dataset; the map (Leaflet with CARTO/OpenStreetMap tiles) joins it to the live shared state by area name.
 - Activations, time windows, and level edits are written directly to shared Cloudflare D1 storage. The public website operates independently of every plugin installation.
 - Each plugin is a reader of the shared desired state and applies it locally when it syncs. No inbound tunnel or router port-forward is used.
@@ -60,6 +61,9 @@ Public website endpoints:
 | `POST /api/sua/windows?name=X&windows=...` | Replace manual UTC windows |
 | `POST /api/sua/levels?name=X&floor=N&ceiling=N` | Stage level edits |
 | `GET /api/sua/notams` | Stored current/upcoming airspace NOTAMs |
+| `GET /api/sua/requests` | Pending user activation requests |
+| `POST /api/sua/requests` | Submit an activation request as JSON |
+| `POST /api/sua/requests/review` | Accept or decline a pending request |
 | `POST /api/sua/notams/activate?id=N&mode=now\|schedule` | Add an explicit NOTAM override |
 | `POST /api/sua/notams/deactivate?id=N` | Clear shared state for matched areas and suppress that NOTAM's automatic re-staging |
 

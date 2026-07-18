@@ -13,6 +13,7 @@ html,body{min-height:100%;background:#a0aaaa;font-family:'Terminus',monospace;fo
 .top .clock{color:#000060;font-size:14px;}
 .top a.maplink{font-family:'Terminus',monospace;font-weight:bold;font-size:13px;border:2px solid #5a6a6a;background:#829292;color:#000060;padding:5px 10px;text-decoration:none;letter-spacing:1px;}
 .top a.maplink:active{background:#000060;color:#c8ffc8;}
+.request-count{display:inline-block;min-width:20px;margin-left:5px;padding:1px 5px;background:#600000;color:#fff;text-align:center;border-radius:9px;}
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;}
 button,select,input{font-family:'Terminus',monospace;font-weight:bold;font-size:13px;border:2px solid #5a6a6a;background:#829292;color:#000060;padding:6px 10px;cursor:pointer;letter-spacing:1px;}
 input[type=text],input[type=number],input[type=datetime-local]{background:#c8d0d0;cursor:text;}
@@ -55,6 +56,10 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .editor label{color:#404a4a;font-size:12px;}
 .editor .hint{color:#404a4a;font-size:11px;margin-top:4px;}
 .msg{padding:8px 14px;color:#600000;font-size:13px;min-height:28px;}
+.request-panel{display:none;position:fixed;inset:0;background:rgba(20,30,30,.7);z-index:20;padding:5vh 14px;overflow:auto;}
+.request-panel.open{display:block;}.request-box{max-width:820px;margin:auto;background:#a0aaaa;border:3px solid #5a6a6a;box-shadow:8px 8px 0 rgba(0,0,0,.3)}
+.request-head{display:flex;align-items:center;gap:10px;padding:10px;background:#5a6a6a;color:#e0e8e8;letter-spacing:1px}.request-head span{margin-right:auto}
+.request-card{padding:12px;border-top:1px solid #5a6a6a;color:#101820}.request-card:first-child{border-top:0}.request-title{color:#000060;font-size:15px}.request-meta{margin-top:5px;font-size:12px;color:#344444}.request-notes{margin-top:7px;white-space:pre-wrap;font-weight:normal}.request-actions{display:flex;gap:7px;margin-top:9px}.request-actions button{width:110px}
 @media (max-width:760px){
   .row{grid-template-columns:minmax(0,1fr) 46px;grid-template-areas:'name type' 'status status' 'actions actions';grid-auto-rows:auto;}
   .row .nm{grid-area:name;}
@@ -70,6 +75,8 @@ button.danger-btn{border-color:#600000;color:#600000;}
 <body>
 <div class='top'>
   <h1>SUA AIRSPACE</h1>
+  <button id='requestsBtn'>REQUESTS <span class='request-count' id='requestCount'>0</span></button>
+  <a class='maplink' href='/request'>REQUEST FORM</a>
   <a class='maplink' href='/map'>AIRSPACE MAP</a>
   <span class='clock' id='clock'>----Z</span>
 </div>
@@ -93,6 +100,10 @@ button.danger-btn{border-color:#600000;color:#600000;}
 </div>
 <div class='msg' id='msg'></div>
 <div class='list' id='list'></div>
+<div class='request-panel' id='requestPanel'><div class='request-box'>
+  <div class='request-head'><span>ACTIVATION REQUESTS</span><button id='closeRequests'>CLOSE</button></div>
+  <div id='requestList'></div>
+</div></div>
 <script>
 (function(){
   var areas = [];
@@ -317,6 +328,34 @@ button.danger-btn{border-color:#600000;color:#600000;}
     }).catch(function(){ document.getElementById('ntStatus').textContent = ''; setMsg('NOTAM scan failed.'); });
   }
 
+  function showRequestTime(value){
+    return String(value || '').replace('T',' ').substring(0,16) + 'Z';
+  }
+
+  function loadRequests(){
+    fetch('/api/sua/requests').then(function(r){ return r.json(); }).then(function(d){
+      var requests = d.Requests || [];
+      document.getElementById('requestCount').textContent = requests.length;
+      var html = '';
+      for (var i = 0; i < requests.length; i++){
+        var q = requests[i];
+        html += "<div class='request-card'><div class='request-title'>" + esc(q.AreaName) + "</div>"
+          + "<div class='request-meta'>" + esc(showRequestTime(q.StartUtc)) + " &ndash; " + esc(showRequestTime(q.EndUtc)) + " &bull; REQUESTED BY " + esc(q.Requester) + "</div>"
+          + (q.Notes ? "<div class='request-notes'>" + esc(q.Notes) + "</div>" : '')
+          + "<div class='request-actions'><button onclick=\"reviewRequest('" + esc(q.Id) + "','accept')\">ACCEPT</button><button class='danger-btn' onclick=\"reviewRequest('" + esc(q.Id) + "','decline')\">DECLINE</button></div></div>";
+      }
+      document.getElementById('requestList').innerHTML = html || "<div class='request-card'>No pending activation requests.</div>";
+    }).catch(function(){ setMsg('Could not load activation requests.'); });
+  }
+
+  window.reviewRequest = function(id, decision){
+    fetch('/api/sua/requests/review', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({Id:id, Decision:decision}) })
+      .then(function(r){ return r.json(); }).then(function(d){
+        if (!d.Success){ setMsg(d.Error || 'Request review failed.'); return; }
+        setMsg(''); loadRequests(); refresh(true);
+      }).catch(function(){ setMsg('Request review failed.'); });
+  };
+
   function setFilter(f, btn){
     filter = f;
     ['fAll','fDanger','fRestricted'].forEach(function(id){ document.getElementById(id).className = ''; });
@@ -333,11 +372,16 @@ button.danger-btn{border-color:#600000;color:#600000;}
     fetch('/api/sua/deactivateall', { method: 'POST' }).then(function(){ refresh(true); }).catch(function(e){ setMsg(e.message || 'Request failed.'); });
   };
   document.getElementById('scan').onclick = scanNotams;
+  document.getElementById('requestsBtn').onclick = function(){ document.getElementById('requestPanel').className = 'request-panel open'; loadRequests(); };
+  document.getElementById('closeRequests').onclick = function(){ document.getElementById('requestPanel').className = 'request-panel'; };
+  document.getElementById('requestPanel').onclick = function(e){ if (e.target === this) this.className = 'request-panel'; };
 
   refresh(true);
   scanNotams();
+  loadRequests();
   setInterval(function(){ refresh(false); }, 5000);
   setInterval(scanNotams, 60000);
+  setInterval(loadRequests, 30000);
 })();
 </script>
 </body>

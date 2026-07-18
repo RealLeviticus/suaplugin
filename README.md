@@ -63,6 +63,7 @@ Public website endpoints:
 | `POST /api/sua/deactivateall` | Clear all desired state |
 | `POST /api/sua/windows?name=X&windows=...` | Replace manual UTC windows |
 | `POST /api/sua/levels?name=X&floor=N&ceiling=N` | Stage level edits |
+| `POST /api/sua/category?name=X&category=RA1\|RA2\|RA3` | Stage an RA category and matching line pattern |
 | `GET /api/sua/notams` | Stored current/upcoming airspace NOTAMs |
 | `GET /api/sua/requests` | Pending user activation requests |
 | `POST /api/sua/requests` | Submit an activation request as JSON |

@@ -281,23 +281,26 @@ async function requireArea(db, name) {
 
 async function upsertManual(db, name, values) {
   const existing = await db.prepare(
-    "SELECT h24, windows, floor, ceiling, expires_at FROM desired_activations WHERE name = ? AND source_type = 'manual' AND source_id = 'web'"
+    "SELECT h24, windows, floor, ceiling, line_pattern, ra_category, expires_at FROM desired_activations WHERE name = ? AND source_type = 'manual' AND source_id = 'web'"
   ).bind(name).first();
   const h24 = values.h24 ?? Boolean(existing?.h24);
   const windows = values.windows ?? parseJson(existing?.windows);
   const floor = values.floor !== undefined ? values.floor : (existing?.floor ?? null);
   const ceiling = values.ceiling !== undefined ? values.ceiling : (existing?.ceiling ?? null);
+  const linePattern = values.linePattern !== undefined ? values.linePattern : (existing?.line_pattern ?? null);
+  const raCategory = values.raCategory !== undefined ? values.raCategory : (existing?.ra_category ?? null);
   const expiresAt = values.expiresAt !== undefined ? values.expiresAt : (existing?.expires_at ?? null);
   const now = new Date().toISOString();
 
   await db.prepare(
     `INSERT INTO desired_activations
-       (name, source_type, source_id, h24, windows, floor, ceiling, expires_at, created_at, updated_at)
-     VALUES (?, 'manual', 'web', ?, ?, ?, ?, ?, ?, ?)
+       (name, source_type, source_id, h24, windows, floor, ceiling, line_pattern, ra_category, expires_at, created_at, updated_at)
+     VALUES (?, 'manual', 'web', ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(name, source_type, source_id) DO UPDATE SET
        h24 = excluded.h24, windows = excluded.windows, floor = excluded.floor,
-       ceiling = excluded.ceiling, expires_at = excluded.expires_at, updated_at = excluded.updated_at`
-  ).bind(name, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling, expiresAt, now, now).run();
+       ceiling = excluded.ceiling, line_pattern = excluded.line_pattern, ra_category = excluded.ra_category,
+       expires_at = excluded.expires_at, updated_at = excluded.updated_at`
+  ).bind(name, h24 ? 1 : 0, JSON.stringify(windows), floor, ceiling, linePattern, raCategory, expiresAt, now, now).run();
 }
 
 async function activateArea(request, env) {
@@ -352,6 +355,16 @@ async function setLevels(request, env) {
     return json({ Success: false, Error: "Ceiling is below floor." }, 400);
   await upsertManual(env.DB, name, { floor, ceiling });
   return json({ Success: true, Name: name, Staged: true });
+}
+
+async function setCategory(request, env) {
+  const url = new URL(request.url);
+  const name = (url.searchParams.get("name") || "").trim();
+  const raCategory = (url.searchParams.get("category") || "").trim().toUpperCase();
+  if (!await requireArea(env.DB, name)) return json({ Success: false, Error: `Unknown area: ${name}` }, 400);
+  if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
+  await upsertManual(env.DB, name, { raCategory, linePattern: categoryLinePattern(raCategory) });
+  return json({ Success: true, Name: name, RaCategory: raCategory });
 }
 
 async function createActivationRequest(request, env) {
@@ -625,6 +638,7 @@ export async function onRequest(context) {
     }
     if (path === "/sua/windows") return setWindows(context.request, context.env);
     if (path === "/sua/levels") return setLevels(context.request, context.env);
+    if (path === "/sua/category") return setCategory(context.request, context.env);
     if (path === "/sua/notams/activate") return activateNotam(context.request, context.env);
     if (path === "/sua/notams/deactivate") return deactivateNotam(context.request, context.env);
     return json({ Error: "Not found." }, 404);

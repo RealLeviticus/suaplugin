@@ -23,6 +23,35 @@ function wireDate(date) {
     pad(date.getUTCHours()) + pad(date.getUTCMinutes());
 }
 
+function dateFromWire(wire) {
+  const value = String(wire || "");
+  if (!/^\d{12}$/.test(value)) return new Date(NaN);
+  return new Date(Date.UTC(Number(value.slice(0, 4)), Number(value.slice(4, 6)) - 1, Number(value.slice(6, 8)), Number(value.slice(8, 10)), Number(value.slice(10, 12))));
+}
+
+export function requestWindows(body) {
+  const submitted = Array.isArray(body?.Windows) && body.Windows.length
+    ? body.Windows : [{ StartUtc: body?.StartUtc, EndUtc: body?.EndUtc }];
+  if (submitted.length > 20) return { error: "A request cannot contain more than 20 activation slots." };
+  const windows = [];
+  for (const slot of submitted) {
+    let start, end;
+    if (typeof slot === "string" && /^\d{12}-\d{12}$/.test(slot)) {
+      start = dateFromWire(slot.slice(0, 12)); end = dateFromWire(slot.slice(13));
+    } else {
+      start = new Date(String(slot?.StartUtc || "")); end = new Date(String(slot?.EndUtc || ""));
+    }
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return { error: "Every activation slot requires valid start and end times." };
+    if (end <= start) return { error: "Every activation slot must end after it starts." };
+    if (end.getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000) return { error: "An activation slot cannot be longer than seven days." };
+    windows.push({ start, end, wire: `${wireDate(start)}-${wireDate(end)}` });
+  }
+  windows.sort((a, b) => a.start - b.start);
+  for (let index = 1; index < windows.length; index++) if (windows[index].start < windows[index - 1].end)
+    return { error: "Activation slots cannot overlap." };
+  return { windows };
+}
+
 function showWindow(wire) {
   const parts = String(wire).split("-");
   if (parts.length !== 2 || parts[0].length !== 12 || parts[1].length !== 12) return wire;
@@ -497,8 +526,7 @@ async function createActivationRequest(request, env, session = null) {
   const contactEmail = String(body?.ContactEmail || "").trim().toLowerCase().slice(0, 254);
   const notes = String(body?.Notes || "").trim().slice(0, 500);
   const raCategory = String(body?.RaCategory || "").trim().toUpperCase();
-  const start = new Date(String(body?.StartUtc || ""));
-  const end = new Date(String(body?.EndUtc || ""));
+  const parsedSlots = requestWindows(body);
   if (!areaNames.length) return json({ Success: false, Error: "Select at least one airspace area." }, 400);
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
@@ -507,42 +535,36 @@ async function createActivationRequest(request, env, session = null) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) return json({ Success: false, Error: "A valid contact email is required." }, 400);
   if (!notes) return json({ Success: false, Error: "Activation details are required. Explain why you need the airspace activated." }, 400);
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
-    return json({ Success: false, Error: "Valid start and end times are required." }, 400);
-  if (end <= start) return json({ Success: false, Error: "The end time must be after the start time." }, 400);
-  if (end <= new Date()) return json({ Success: false, Error: "The requested time has already ended." }, 400);
-  if (end.getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000)
-    return json({ Success: false, Error: "A request cannot be longer than seven days." }, 400);
+  if (parsedSlots.error) return json({ Success: false, Error: parsedSlots.error }, 400);
+  if (parsedSlots.windows.some((slot) => slot.end <= new Date())) return json({ Success: false, Error: "Every requested activation slot must end in the future." }, 400);
+  const firstSlot = parsedSlots.windows[0], lastSlot = parsedSlots.windows[parsedSlots.windows.length - 1];
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   await env.DB.prepare(
     `INSERT INTO activation_requests
-       (id, area_name, area_names, requester, contact_email, start_utc, end_utc, notes, ra_category, vatsim_cid, vatsim_name, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
-  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, contactEmail, start.toISOString(), end.toISOString(), notes, raCategory,
+       (id, area_name, area_names, requester, contact_email, start_utc, end_utc, request_windows, notes, ra_category, vatsim_cid, vatsim_name, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
+  ).bind(id, areaNames[0], JSON.stringify(areaNames), requester, contactEmail, firstSlot.start.toISOString(), lastSlot.end.toISOString(), JSON.stringify(parsedSlots.windows.map((slot) => slot.wire)), notes, raCategory,
     session?.vatsim_cid || null, session?.vatsim_name || null, now).run();
   let discordNotified = false;
   if (env.DISCORD_REQUEST_WEBHOOK_URL) {
     const categoryColor = raCategory === "RA1" ? 0x008040 : (raCategory === "RA2" ? 0xd0b000 : 0xc00000);
     const categoryStyle = raCategory === "RA1" ? "Dashed line · DAIW off"
       : (raCategory === "RA2" ? "Dotted line · DAIW on" : "Solid line · DAIW on");
-    const startUnix = Math.floor(start.getTime() / 1000), endUnix = Math.floor(end.getTime() / 1000);
-    const durationMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
-    const duration = durationMinutes >= 60 && durationMinutes % 60 === 0
-      ? `${durationMinutes / 60} hour${durationMinutes === 60 ? "" : "s"}`
-      : `${durationMinutes} minutes`;
+    const slotSummary = parsedSlots.windows.map((slot, index) => {
+      const startUnix = Math.floor(slot.start.getTime() / 1000), endUnix = Math.floor(slot.end.getTime() / 1000);
+      return `**${index + 1}.** <t:${startUnix}:F> – <t:${endUnix}:F>`;
+    }).join("\n").slice(0, 1024);
     const requesterIdentity = session?.vatsim_cid
       ? `**${requester}**\n${session.vatsim_name ? `${session.vatsim_name} · ` : ""}VATSIM CID ${session.vatsim_cid}`
       : `**${requester}**`;
     const fields = [
       { name: `Requested airspace (${areaNames.length})`, value: areaNames.map((name) => `• **${name}**`).join("\n").slice(0, 1024), inline: false },
       { name: "RA category", value: `**${raCategory}**\n${categoryStyle}`, inline: true },
-      { name: "Duration", value: `**${duration}**`, inline: true },
+      { name: "Activation slots", value: slotSummary, inline: false },
       { name: "Requested by", value: requesterIdentity.slice(0, 1024), inline: false },
       { name: "Contact email", value: contactEmail, inline: false },
-      { name: "Starts", value: `<t:${startUnix}:F>\n<t:${startUnix}:R>`, inline: true },
-      { name: "Ends", value: `<t:${endUnix}:F>\n<t:${endUnix}:R>`, inline: true },
     ];
     fields.push({ name: "Activation details", value: notes.slice(0, 1024), inline: false });
     try {
@@ -560,7 +582,7 @@ async function createActivationRequest(request, env, session = null) {
 
 async function activationRequestsResponse(env) {
   const result = await env.DB.prepare(
-    `SELECT id, area_name, area_names, requester, contact_email, start_utc, end_utc, notes, ra_category, status, created_at, reviewed_at
+    `SELECT id, area_name, area_names, requester, contact_email, start_utc, end_utc, request_windows, notes, ra_category, status, created_at, reviewed_at
        FROM activation_requests
       WHERE status = 'pending'
       ORDER BY start_utc, created_at`
@@ -569,7 +591,9 @@ async function activationRequestsResponse(env) {
     Id: row.id, AreaName: row.area_name,
     AreaNames: (() => { const names = parseJson(row.area_names); return names.length ? names : [row.area_name]; })(),
     Requester: row.requester, ContactEmail: row.contact_email, RaCategory: row.ra_category || "RA1",
-    StartUtc: row.start_utc, EndUtc: row.end_utc, Notes: row.notes,
+    StartUtc: row.start_utc, EndUtc: row.end_utc,
+    Windows: (() => { const windows = parseJson(row.request_windows); return windows.length ? windows : [`${wireDate(new Date(row.start_utc))}-${wireDate(new Date(row.end_utc))}`]; })(),
+    Notes: row.notes,
     Status: row.status, CreatedAt: row.created_at, ReviewedAt: row.reviewed_at,
   })) });
 }
@@ -581,26 +605,22 @@ async function updateActivationRequest(request, env) {
   const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [];
   const areaNames = Array.from(new Set(submittedAreas.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 50);
   const raCategory = String(body?.RaCategory || "").trim().toUpperCase();
-  const start = new Date(String(body?.StartUtc || ""));
-  const end = new Date(String(body?.EndUtc || ""));
+  const parsedSlots = requestWindows(body);
   if (!id) return json({ Success: false, Error: "Request id is required." }, 400);
   if (!areaNames.length) return json({ Success: false, Error: "Select at least one airspace area." }, 400);
   for (const areaName of areaNames) {
     if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
   }
   if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
-    return json({ Success: false, Error: "Valid start and end times are required." }, 400);
-  if (end <= start) return json({ Success: false, Error: "The end time must be after the start time." }, 400);
-  if (end <= new Date()) return json({ Success: false, Error: "The requested time has already ended." }, 400);
-  if (end.getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000)
-    return json({ Success: false, Error: "A request cannot be longer than seven days." }, 400);
+  if (parsedSlots.error) return json({ Success: false, Error: parsedSlots.error }, 400);
+  if (parsedSlots.windows.some((slot) => slot.end <= new Date())) return json({ Success: false, Error: "Every requested activation slot must end in the future." }, 400);
+  const firstSlot = parsedSlots.windows[0], lastSlot = parsedSlots.windows[parsedSlots.windows.length - 1];
 
   const result = await env.DB.prepare(
     `UPDATE activation_requests
-        SET area_name = ?, area_names = ?, start_utc = ?, end_utc = ?, ra_category = ?
+        SET area_name = ?, area_names = ?, start_utc = ?, end_utc = ?, request_windows = ?, ra_category = ?
       WHERE id = ? AND status = 'pending'`
-  ).bind(areaNames[0], JSON.stringify(areaNames), start.toISOString(), end.toISOString(), raCategory, id).run();
+  ).bind(areaNames[0], JSON.stringify(areaNames), firstSlot.start.toISOString(), lastSlot.end.toISOString(), JSON.stringify(parsedSlots.windows.map((slot) => slot.wire)), raCategory, id).run();
   if (!result.meta?.changes) return json({ Success: false, Error: "This request is no longer pending." }, 409);
   return json({ Success: true, Id: id });
 }
@@ -620,9 +640,11 @@ async function reviewActivationRequest(request, env) {
   const now = new Date().toISOString();
   const statements = [];
   if (decision === "accept") {
-    const start = new Date(row.start_utc);
-    const end = new Date(row.end_utc);
-    if (end <= new Date()) return json({ Success: false, Error: "This request has already expired." }, 409);
+    const storedWindows = parseJson(row.request_windows);
+    const windows = (storedWindows.length ? storedWindows : [`${wireDate(new Date(row.start_utc))}-${wireDate(new Date(row.end_utc))}`])
+      .filter((window) => /^\d{12}-\d{12}$/.test(window) && dateFromWire(window.slice(13)) > new Date());
+    if (!windows.length) return json({ Success: false, Error: "Every activation slot in this request has expired." }, 409);
+    const lastEnd = dateFromWire(windows[windows.length - 1].slice(13));
     const requestedAreas = parseJson(row.area_names);
     const areaNames = requestedAreas.length ? requestedAreas : [row.area_name];
     for (const areaName of areaNames) statements.push(env.DB.prepare(
@@ -632,8 +654,8 @@ async function reviewActivationRequest(request, env) {
        ON CONFLICT(name, source_type, source_id) DO UPDATE SET
          windows=excluded.windows, line_pattern=excluded.line_pattern, ra_category=excluded.ra_category,
          expires_at=excluded.expires_at, updated_at=excluded.updated_at`
-    ).bind(areaName, row.id, JSON.stringify([`${wireDate(start)}-${wireDate(end)}`]),
-      categoryLinePattern(row.ra_category || "RA1"), row.ra_category || "RA1", end.toISOString(), now, now));
+    ).bind(areaName, row.id, JSON.stringify(windows),
+      categoryLinePattern(row.ra_category || "RA1"), row.ra_category || "RA1", lastEnd.toISOString(), now, now));
   }
   statements.push(env.DB.prepare(
     "UPDATE activation_requests SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'"

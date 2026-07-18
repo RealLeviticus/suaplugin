@@ -62,6 +62,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
 .request-head{display:flex;align-items:center;gap:10px;padding:10px;background:#5a6a6a;color:#e0e8e8;letter-spacing:1px}.request-head span{margin-right:auto}
 .request-card{padding:12px;border-top:1px solid #5a6a6a;color:#101820}.request-card:first-child{border-top:0}.request-title{color:#000060;font-size:15px}.request-meta{margin-top:5px;font-size:12px;color:#344444}.request-notes{margin-top:7px;white-space:pre-wrap;font-weight:normal}.request-actions{display:flex;gap:7px;margin-top:9px}.request-actions button{width:110px}
 .request-edit{margin-top:10px;padding:10px;border:2px solid #5a6a6a;background:#96a4a4;display:grid;grid-template-columns:1fr 1fr;gap:9px}.request-edit .full{grid-column:1/-1}.request-edit label{display:block;color:#404a4a;font-size:11px;margin-bottom:3px}.request-edit input,.request-edit select{width:100%;background:#c8d0d0}.request-area-list{border:2px solid #5a6a6a;background:#a0aaaa;max-height:220px;overflow:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.request-edit .request-area-option{display:flex;align-items:center;gap:7px;padding:7px 9px;margin:0;border-right:1px solid #829292;border-bottom:1px solid #829292;color:#101820;cursor:pointer}.request-edit .request-area-option:hover{background:#b2bbbb}.request-edit .request-area-option input{width:auto;accent-color:#000060}.request-area-option .area-type{margin-left:auto;color:#404a4a}.request-edit .request-actions{grid-column:1/-1;margin-top:0}
+.request-slot{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-bottom:8px;padding:8px;border:1px solid #5a6a6a}.request-slot button{height:31px}
 @media (max-width:760px){
   .row{grid-template-columns:minmax(0,1fr) 100px 60px;grid-template-areas:'name type cat' 'status status status' 'actions actions actions';grid-auto-rows:auto;}
   .row .nm{grid-area:name;}
@@ -72,7 +73,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
   .row > .sched,.row > .lv{display:none;}
   .row.head{grid-template-areas:'name type cat';}
   .row.head .st,.row.head .ac{display:none;}
-  .request-edit{grid-template-columns:1fr}.request-edit .full{grid-column:auto}.request-area-list{grid-template-columns:1fr}
+  .request-edit{grid-template-columns:1fr}.request-edit .full{grid-column:auto}.request-area-list{grid-template-columns:1fr}.request-slot{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -116,6 +117,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
   var areas = [];
   var requestItems = [];
   var editingRequest = null;
+  var requestEditWindows = [];
   var filter = 'ALL';
   var search = '';
   var editing = null;   // area name whose editor is open
@@ -372,6 +374,32 @@ button.danger-btn{border-color:#600000;color:#600000;}
 
   function requestInputTime(value){ return String(value || '').substring(0,16); }
 
+  function requestWindowLabel(wire){
+    var p = String(wire || '').split('-');
+    if (p.length !== 2 || p[0].length !== 12 || p[1].length !== 12) return esc(wire);
+    return esc(p[0].substring(6,8) + '/' + p[0].substring(4,6) + '/' + p[0].substring(0,4) + ' ' + p[0].substring(8,12) + 'Z – '
+      + p[1].substring(6,8) + '/' + p[1].substring(4,6) + '/' + p[1].substring(0,4) + ' ' + p[1].substring(8,12) + 'Z');
+  }
+
+  function syncRequestSlots(id){
+    for (var i = 0; i < requestEditWindows.length; i++){
+      var start = document.getElementById('rqStart-' + id + '-' + i);
+      var end = document.getElementById('rqEnd-' + id + '-' + i);
+      if (start) requestEditWindows[i].Start = start.value;
+      if (end) requestEditWindows[i].End = end.value;
+    }
+  }
+
+  function requestSlotsEditor(q){
+    var html = '';
+    for (var i = 0; i < requestEditWindows.length; i++){
+      html += "<div class='request-slot'><div><label>START (UTC)</label><input id='rqStart-" + esc(q.Id) + '-' + i + "' type='datetime-local' value='" + esc(requestEditWindows[i].Start) + "'></div>"
+        + "<div><label>END (UTC)</label><input id='rqEnd-" + esc(q.Id) + '-' + i + "' type='datetime-local' value='" + esc(requestEditWindows[i].End) + "'></div>"
+        + (requestEditWindows.length > 1 ? "<button class='danger-btn' onclick='removeRequestSlot(&quot;" + esc(q.Id) + "&quot;," + i + ")'>REMOVE</button>" : '') + "</div>";
+    }
+    return html + "<button onclick='addRequestSlot(&quot;" + esc(q.Id) + "&quot;)'>+ ADD ANOTHER TIME SLOT</button>";
+  }
+
   function renderRequestEditor(q){
     var selectedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
     var checkboxes = '';
@@ -381,8 +409,7 @@ button.danger-btn{border-color:#600000;color:#600000;}
     var category = q.RaCategory || 'RA1';
     return "<div class='request-edit'>"
       + "<div class='full'><label>AIRSPACE</label><div class='request-area-list' id='rqAreas-" + esc(q.Id) + "'>" + checkboxes + "</div></div>"
-      + "<div><label>START (UTC)</label><input id='rqStart-" + esc(q.Id) + "' type='datetime-local' value='" + esc(requestInputTime(q.StartUtc)) + "'></div>"
-      + "<div><label>END (UTC)</label><input id='rqEnd-" + esc(q.Id) + "' type='datetime-local' value='" + esc(requestInputTime(q.EndUtc)) + "'></div>"
+      + "<div class='full'><label>ACTIVATION TIME SLOTS</label>" + requestSlotsEditor(q) + "</div>"
       + "<div><label>RA CATEGORY</label><select id='rqCategory-" + esc(q.Id) + "'><option" + (category === 'RA1' ? ' selected' : '') + ">RA1</option><option" + (category === 'RA2' ? ' selected' : '') + ">RA2</option><option" + (category === 'RA3' ? ' selected' : '') + ">RA3</option></select></div>"
       + "<div class='request-actions'><button onclick=\"saveRequestEdit('" + esc(q.Id) + "')\">SAVE CHANGES</button><button onclick='cancelRequestEdit()'>CANCEL</button></div></div>";
   }
@@ -397,8 +424,12 @@ button.danger-btn{border-color:#600000;color:#600000;}
         var q = requests[i];
         var requestedNames = q.AreaNames && q.AreaNames.length ? q.AreaNames : [q.AreaName];
         var category = q.RaCategory || 'RA1';
+        var requestWindows = q.Windows && q.Windows.length ? q.Windows : [];
+        var slotSummary = '';
+        for (var w = 0; w < requestWindows.length; w++) slotSummary += "<div>SLOT " + (w + 1) + ' · ' + requestWindowLabel(requestWindows[w]) + "</div>";
+        if (!slotSummary) slotSummary = esc(showRequestTime(q.StartUtc)) + " &ndash; " + esc(showRequestTime(q.EndUtc));
         html += "<div class='request-card'><div class='request-title'>" + esc(requestedNames.join(', ')) + " <span class='pill " + category.toLowerCase() + "'>" + esc(category) + "</span></div>"
-          + "<div class='request-meta'>" + esc(showRequestTime(q.StartUtc)) + " &ndash; " + esc(showRequestTime(q.EndUtc)) + " &bull; REQUESTED BY " + esc(q.Requester) + " &bull; " + esc(q.ContactEmail || '') + "</div>"
+          + "<div class='request-meta'>" + slotSummary + "<div>REQUESTED BY " + esc(q.Requester) + " &bull; " + esc(q.ContactEmail || '') + "</div></div>"
           + (q.Notes ? "<div class='request-notes'>" + esc(q.Notes) + "</div>" : '')
           + "<div class='request-actions'><button onclick=\"editRequest('" + esc(q.Id) + "')\">EDIT</button><button onclick=\"reviewRequest('" + esc(q.Id) + "','accept')\">ACCEPT</button><button class='danger-btn' onclick=\"reviewRequest('" + esc(q.Id) + "','decline')\">DECLINE</button></div>"
           + (editingRequest === q.Id ? renderRequestEditor(q) : '') + "</div>";
@@ -407,16 +438,36 @@ button.danger-btn{border-color:#600000;color:#600000;}
     }).catch(function(){ setMsg('Could not load activation requests.'); });
   }
 
-  window.editRequest = function(id){ editingRequest = id; loadRequests(); };
+  window.editRequest = function(id){
+    editingRequest = id; requestEditWindows = [];
+    for (var i = 0; i < requestItems.length; i++) if (requestItems[i].Id === id){
+      var q = requestItems[i], windows = q.Windows || [];
+      for (var w = 0; w < windows.length; w++){
+        var p = String(windows[w]).split('-');
+        if (p.length === 2) requestEditWindows.push({Start:wireToInput(p[0]), End:wireToInput(p[1])});
+      }
+      if (!requestEditWindows.length) requestEditWindows.push({Start:requestInputTime(q.StartUtc), End:requestInputTime(q.EndUtc)});
+      break;
+    }
+    loadRequests();
+  };
   window.cancelRequestEdit = function(){ editingRequest = null; loadRequests(); };
+  window.addRequestSlot = function(id){
+    syncRequestSlots(id);
+    if (requestEditWindows.length >= 20){ setMsg('A request cannot contain more than 20 activation slots.'); return; }
+    var start = requestEditWindows.length ? requestEditWindows[requestEditWindows.length - 1].End : requestInputTime(new Date().toISOString());
+    var endDate = new Date(start + ':00Z'); endDate.setUTCHours(endDate.getUTCHours() + 1);
+    requestEditWindows.push({Start:start, End:requestInputTime(endDate.toISOString())}); loadRequests();
+  };
+  window.removeRequestSlot = function(id, index){ syncRequestSlots(id); requestEditWindows.splice(index, 1); loadRequests(); };
   window.saveRequestEdit = function(id){
+    syncRequestSlots(id);
     var areaInputs = document.getElementById('rqAreas-' + id).getElementsByTagName('input');
     var names = [];
     for (var i = 0; i < areaInputs.length; i++) if (areaInputs[i].checked) names.push(areaInputs[i].value);
     var payload = {
       Id: id, AreaNames: names,
-      StartUtc: document.getElementById('rqStart-' + id).value + ':00Z',
-      EndUtc: document.getElementById('rqEnd-' + id).value + ':00Z',
+      Windows: requestEditWindows.map(function(w){ return {StartUtc:w.Start + ':00Z', EndUtc:w.End + ':00Z'}; }),
       RaCategory: document.getElementById('rqCategory-' + id).value
     };
     fetch('/api/sua/requests/update', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) })

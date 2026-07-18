@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS activation_requests (
     contact_email TEXT NOT NULL DEFAULT '',
     start_utc TEXT NOT NULL,
     end_utc TEXT NOT NULL,
+    request_windows TEXT NOT NULL DEFAULT '[]',
     notes TEXT NOT NULL DEFAULT '',
     ra_category TEXT NOT NULL DEFAULT 'RA1',
     vatsim_cid TEXT,

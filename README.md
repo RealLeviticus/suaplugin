@@ -25,6 +25,7 @@ Open `https://sua.actuallyleviticus.xyz/`.
 - `ACT` saves an H24 or duration-based shared activation. `DEACT` clears saved shared sources; vatSys-native/default activations are read-only and remain active.
 - `EDIT` changes levels or replaces the area's dated UTC activation windows.
 - `SAVED` means the desired state is stored in D1 and is available to every plugin installation independently.
+- Pending activation requests can be edited from the `REQUESTS` panel before review, including their selected areas, RA category, UTC times, requester, and notes. Accepted or declined requests are no longer editable.
 - `USER: CID` identifies a live activation configured by that controller in vatSys and shared to other connected controllers. The CID comes directly from vatSys's connection state. These sources use a short renewable lease so they disappear after the originating plugin disconnects.
 - A live vatSys controller activation displays only its timing state (`ACTIVE`, `PREACT`, or `OFF`) and `USER: CID`; overlapping stored sources do not add `MAN`, `SCHED`, or `SAVED` badges to that row.
 - Controllers connected with the OBS facility can view dataset and shared SUA, but cannot retain or publish Restricted Area activations, regardless of their underlying VATSIM certification rating. Local OBS changes are restored to the dataset/shared state and the cloud API ignores OBS controller activations.
@@ -63,6 +64,7 @@ Public website endpoints:
 | `GET /api/sua/notams` | Stored current/upcoming airspace NOTAMs |
 | `GET /api/sua/requests` | Pending user activation requests |
 | `POST /api/sua/requests` | Submit an activation request as JSON |
+| `POST /api/sua/requests/update` | Edit the details of a pending request |
 | `POST /api/sua/requests/review` | Accept or decline a pending request |
 | `POST /api/sua/notams/activate?id=N&mode=now\|schedule` | Add an explicit NOTAM override |
 | `POST /api/sua/notams/deactivate?id=N` | Clear shared state for matched areas and suppress that NOTAM's automatic re-staging |

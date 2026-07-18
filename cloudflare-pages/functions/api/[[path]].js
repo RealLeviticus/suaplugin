@@ -390,6 +390,40 @@ async function activationRequestsResponse(env) {
   })) });
 }
 
+async function updateActivationRequest(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
+  const id = String(body?.Id || "").trim();
+  const submittedAreas = Array.isArray(body?.AreaNames) ? body.AreaNames : [];
+  const areaNames = Array.from(new Set(submittedAreas.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 50);
+  const requester = String(body?.Requester || "").trim().slice(0, 80);
+  const notes = String(body?.Notes || "").trim().slice(0, 500);
+  const raCategory = String(body?.RaCategory || "").trim().toUpperCase();
+  const start = new Date(String(body?.StartUtc || ""));
+  const end = new Date(String(body?.EndUtc || ""));
+  if (!id) return json({ Success: false, Error: "Request id is required." }, 400);
+  if (!areaNames.length) return json({ Success: false, Error: "Select at least one airspace area." }, 400);
+  for (const areaName of areaNames) {
+    if (!await requireArea(env.DB, areaName)) return json({ Success: false, Error: `Unknown area: ${areaName}` }, 400);
+  }
+  if (!requester) return json({ Success: false, Error: "Requester is required." }, 400);
+  if (!/^RA[123]$/.test(raCategory)) return json({ Success: false, Error: "Select RA1, RA2, or RA3." }, 400);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()))
+    return json({ Success: false, Error: "Valid start and end times are required." }, 400);
+  if (end <= start) return json({ Success: false, Error: "The end time must be after the start time." }, 400);
+  if (end <= new Date()) return json({ Success: false, Error: "The requested time has already ended." }, 400);
+  if (end.getTime() - start.getTime() > 7 * 24 * 60 * 60 * 1000)
+    return json({ Success: false, Error: "A request cannot be longer than seven days." }, 400);
+
+  const result = await env.DB.prepare(
+    `UPDATE activation_requests
+        SET area_name = ?, area_names = ?, requester = ?, start_utc = ?, end_utc = ?, notes = ?, ra_category = ?
+      WHERE id = ? AND status = 'pending'`
+  ).bind(areaNames[0], JSON.stringify(areaNames), requester, start.toISOString(), end.toISOString(), notes, raCategory, id).run();
+  if (!result.meta?.changes) return json({ Success: false, Error: "This request is no longer pending." }, 409);
+  return json({ Success: true, Id: id });
+}
+
 async function reviewActivationRequest(request, env) {
   let body;
   try { body = await request.json(); } catch { return json({ Success: false, Error: "Invalid JSON." }, 400); }
@@ -547,6 +581,7 @@ export async function onRequest(context) {
 
     if (method !== "POST") return json({ Error: "Not found." }, 404);
     if (path === "/sua/requests") return createActivationRequest(context.request, context.env);
+    if (path === "/sua/requests/update") return updateActivationRequest(context.request, context.env);
     if (path === "/sua/requests/review") return reviewActivationRequest(context.request, context.env);
     if (path === "/sua/activate") return activateArea(context.request, context.env);
     if (path === "/sua/deactivate") {
